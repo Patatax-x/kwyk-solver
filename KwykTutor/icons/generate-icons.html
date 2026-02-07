@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generateur d'icones Kwyk Tutor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #667eea;
+        }
+        .icons {
+            display: flex;
+            gap: 30px;
+            margin: 30px 0;
+            flex-wrap: wrap;
+        }
+        .icon-box {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        canvas {
+            display: block;
+            margin: 10px auto;
+            border: 1px solid #ddd;
+        }
+        .download-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .download-btn:hover {
+            background: #764ba2;
+        }
+        .instructions {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Generateur d'icones Kwyk Tutor</h1>
+        <p>Clique sur chaque bouton pour telecharger l'icone correspondante.</p>
+
+        <div class="icons">
+            <div class="icon-box">
+                <h3>16x16</h3>
+                <canvas id="icon16" width="16" height="16"></canvas>
+                <button class="download-btn" onclick="download('icon16', 16)">Telecharger</button>
+            </div>
+            <div class="icon-box">
+                <h3>48x48</h3>
+                <canvas id="icon48" width="48" height="48"></canvas>
+                <button class="download-btn" onclick="download('icon48', 48)">Telecharger</button>
+            </div>
+            <div class="icon-box">
+                <h3>128x128</h3>
+                <canvas id="icon128" width="128" height="128"></canvas>
+                <button class="download-btn" onclick="download('icon128', 128)">Telecharger</button>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <h3>Instructions :</h3>
+            <ol>
+                <li>Ouvre ce fichier dans ton navigateur (double-clic)</li>
+                <li>Clique sur chaque bouton "Telecharger"</li>
+                <li>Enregistre les fichiers dans le dossier <code>icons/</code> de l'extension</li>
+                <li>Renomme-les : icon16.png, icon48.png, icon128.png</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Dessine l'icone sur un canvas
+        function drawIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+
+            // Fond degrade
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#667eea');
+            gradient.addColorStop(1, '#764ba2');
+
+            // Cercle de fond
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(size/2, size/2, size/2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Point d'interrogation
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${size * 0.6}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('?', size/2, size/2);
+        }
+
+        // Telecharger l'icone
+        function download(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = `icon${size}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // Dessiner toutes les icones au chargement
+        drawIcon('icon16', 16);
+        drawIcon('icon48', 48);
+        drawIcon('icon128', 128);
+    </script>
+</body>
+</html>
