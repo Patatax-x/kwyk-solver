@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "Kwyk Tutor V13",
+  "version": "13.0.0",
+  "description": "Assistant pedagogique pour les exercices de maths sur Kwyk.fr - Version 13",
+  "author": "Morgan Bouchon",
+
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "https://www.kwyk.fr/*",
+    "https://api.mistral.ai/*",
+    "https://gist.githubusercontent.com/*",
+    "https://raw.githubusercontent.com/*"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.kwyk.fr/*", "https://kwyk.fr/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["https://www.kwyk.fr/*", "https://kwyk.fr/*"],
+      "js": ["inject.js"],
+      "run_at": "document_end",
+      "world": "MAIN"
+    }
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["content.js"],
+      "matches": ["https://www.kwyk.fr/*", "https://kwyk.fr/*"]
+    }
+  ],
+
+  "options_page": "options.html",
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

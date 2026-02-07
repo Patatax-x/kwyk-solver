@@ -1,0 +1,935 @@
+/* ===========================================
+   Kwyk Tutor v18 - Interface propre
+   =========================================== */
+
+/* ===========================================
+   POPUP DE BLOCAGE (contrôle en cours)
+   =========================================== */
+
+#kwyk-blocked-popup {
+  position: fixed;
+  bottom: 65px;
+  right: 15px;
+  background: #1a1a2e;
+  border: 1px solid #e74c3c;
+  border-radius: 10px;
+  padding: 14px 18px;
+  z-index: 100001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 300px;
+  box-shadow: 0 4px 20px rgba(231, 76, 60, 0.3);
+  animation: kwyk-popup-in 0.2s ease-out;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.kwyk-blocked-popup-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.kwyk-blocked-popup-text {
+  color: #eaeaea;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@keyframes kwyk-popup-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Bannière de mise à jour */
+#kwyk-update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  margin: 8px 12px 0;
+  font-size: 12px;
+  color: #b8c4ff;
+  animation: kwyk-popup-in 0.3s ease-out;
+}
+
+#kwyk-update-banner span {
+  flex: 1;
+}
+
+#kwyk-update-link {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border: none;
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+#kwyk-update-link:hover {
+  opacity: 0.85;
+}
+
+/* Bouton flottant */
+#kwyk-tutor-btn {
+  position: fixed;
+  bottom: 15px;
+  right: 15px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+  opacity: 0.85;
+}
+
+#kwyk-tutor-btn:hover {
+  transform: scale(1.1);
+  opacity: 1;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+}
+
+#kwyk-tutor-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: white;
+  pointer-events: none;
+}
+
+/* Panneau popup */
+#kwyk-tutor-panel {
+  position: fixed;
+  bottom: 70px;
+  right: 15px;
+  width: 320px;
+  max-height: 450px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 100000;
+  display: none;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+}
+
+#kwyk-tutor-panel.open {
+  display: flex;
+}
+
+/* Header */
+.kwyk-tutor-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 10px 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.kwyk-tutor-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.kwyk-tutor-close {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.8;
+  line-height: 1;
+}
+
+.kwyk-tutor-close:hover {
+  opacity: 1;
+}
+
+/* V12: Bouton stats toggle (discret en haut à gauche) */
+.kwyk-stats-toggle {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: all 0.2s;
+}
+
+.kwyk-stats-toggle:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Preview exercice */
+.kwyk-exercise-preview {
+  padding: 8px 12px;
+  background: #f0f4ff;
+  border-bottom: 1px solid #e0e7ff;
+  font-size: 11px;
+  max-height: 70px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.kwyk-exercise-preview small {
+  color: #667eea;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 4px;
+}
+
+#kwyk-preview-text {
+  color: #444;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Navigation questions */
+.kwyk-question-nav {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #f0f4ff;
+  border-bottom: 1px solid #e0e7ff;
+  flex-wrap: wrap;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kwyk-question-btn {
+  min-width: 36px;
+  padding: 6px 10px;
+  border: 2px solid #667eea;
+  border-radius: 16px;
+  background: white;
+  color: #667eea;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.kwyk-question-btn:hover {
+  background: #f0f4ff;
+  transform: translateY(-1px);
+}
+
+.kwyk-question-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
+}
+
+/* Status bar */
+.kwyk-status {
+  padding: 6px 12px;
+  font-size: 11px;
+  text-align: center;
+  display: none;
+  flex-shrink: 0;
+  background: #f8f9fa;
+}
+
+.kwyk-status .status-loading {
+  color: #1976d2;
+}
+
+.kwyk-status .status-success {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.kwyk-status .status-info {
+  color: #667eea;
+}
+
+.kwyk-status .status-error {
+  color: #dc3545;
+}
+
+/* Boutons d'action */
+.kwyk-action-buttons {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  flex-shrink: 0;
+}
+
+.kwyk-action-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.kwyk-action-btn.primary {
+  background: #667eea;
+  color: white;
+}
+
+.kwyk-action-btn.primary:hover:not(:disabled) {
+  background: #5a6fd6;
+}
+
+.kwyk-action-btn.secondary {
+  background: #e9ecef;
+  color: #495057;
+}
+
+.kwyk-action-btn.secondary:hover:not(:disabled) {
+  background: #dee2e6;
+}
+
+.kwyk-action-btn.warning {
+  background: #ffc107;
+  color: #212529;
+}
+
+.kwyk-action-btn.warning:hover:not(:disabled) {
+  background: #e0a800;
+}
+
+.kwyk-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Avertissement exercice non supporté */
+.kwyk-unsupported-warning {
+  background: #fdecea;
+  border: 1px solid #f5c6cb;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 12px;
+  text-align: center;
+}
+
+.kwyk-unsupported-warning strong {
+  display: block;
+  color: #c62828;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.kwyk-unsupported-warning p {
+  color: #b71c1c;
+  font-size: 12px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.kwyk-unsupported-joke {
+  margin-top: 8px !important;
+  font-style: italic;
+  color: #666 !important;
+  font-size: 11px !important;
+}
+
+/* Zone de réponse */
+.kwyk-response-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  max-height: 280px;
+  min-height: 80px;
+}
+
+/* Bulle de réponse */
+.kwyk-bubble {
+  background: #f1f3f4;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #202124;
+  animation: kwyk-fadeIn 0.3s ease;
+}
+
+.kwyk-bubble.error {
+  background: #fce8e6;
+  color: #c5221f;
+}
+
+@keyframes kwyk-fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading */
+.kwyk-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #5f6368;
+  font-size: 12px;
+  padding: 20px;
+  justify-content: center;
+}
+
+.kwyk-loading-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.kwyk-loading-dots span {
+  width: 6px;
+  height: 6px;
+  background: #667eea;
+  border-radius: 50%;
+  animation: kwyk-bounce 1.4s infinite ease-in-out both;
+}
+
+.kwyk-loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.kwyk-loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes kwyk-bounce {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* Scrollbar */
+.kwyk-response-area::-webkit-scrollbar {
+  width: 4px;
+}
+
+.kwyk-response-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kwyk-response-area::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 2px;
+}
+
+/* ===========================================
+   Sections de contenu
+   =========================================== */
+
+/* Badges */
+.kwyk-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: #667eea;
+  color: white;
+  margin-right: 8px;
+  letter-spacing: 0.3px;
+}
+
+.kwyk-badge.formula {
+  background: #1976d2;
+}
+
+.kwyk-badge.hint {
+  background: #ff9800;
+}
+
+/* Section notion */
+.kwyk-section-notion {
+  padding: 8px 12px;
+  margin: 6px 0;
+  background: #f3e5f5;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #4a148c;
+}
+
+/* Section formule */
+.kwyk-section-formula {
+  padding: 10px 12px;
+  margin: 6px 0;
+  background: #e3f2fd;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* Section indice */
+.kwyk-section-hint {
+  padding: 10px 12px;
+  margin: 6px 0;
+  background: #fff3e0;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #e65100;
+}
+
+/* Titre de section */
+.kwyk-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #495057;
+  margin: 10px 0 4px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+/* Étapes */
+.kwyk-steps {
+  margin: 6px 0;
+}
+
+.kwyk-step {
+  padding: 6px 10px;
+  margin: 4px 0;
+  background: #f8f9fa;
+  border-left: 3px solid #667eea;
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ===========================================
+   Affichage des réponses
+   =========================================== */
+
+/* Conteneur toutes les réponses */
+.kwyk-all-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Chaque réponse complète */
+.kwyk-answer-item-full {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid #667eea;
+}
+
+.kwyk-answer-item-full .kwyk-answer-question {
+  font-size: 11px;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Boîte de réponse */
+.kwyk-answer-box {
+  background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+  border: 2px solid #28a745;
+  border-radius: 8px;
+  padding: 12px 15px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kwyk-answer-box.qcm {
+  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+  border-color: #1976d2;
+}
+
+.kwyk-answer-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #155724;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kwyk-answer-box.qcm .kwyk-answer-label {
+  color: #0d47a1;
+}
+
+/* CORRECTION CRITIQUE : Support des formules mathématiques */
+.kwyk-answer-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #155724;
+  font-family: 'Consolas', 'Monaco', monospace;
+  /* CHANGEMENT : word-break retiré pour ne pas casser les formules */
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  padding: 8px 10px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #28a745;
+  line-height: 1.6;
+}
+
+.kwyk-answer-box.qcm .kwyk-answer-value {
+  color: #1565c0;
+  border-color: #1976d2;
+  font-size: 15px;
+  text-align: center;
+}
+
+/* Support des exposants et indices */
+.kwyk-answer-value sup {
+  font-size: 0.7em;
+  vertical-align: super;
+  line-height: 0;
+}
+
+.kwyk-answer-value sub {
+  font-size: 0.7em;
+  vertical-align: sub;
+  line-height: 0;
+}
+
+/* Support des strong (pour "Option A") */
+.kwyk-answer-value strong {
+  font-weight: 700;
+  color: inherit;
+}
+
+/* ===========================================
+   FRACTIONS VISUELLES (comme de vraies fractions mathématiques)
+   =========================================== */
+
+/* Conteneur de fraction */
+.kwyk-fraction {
+  display: inline-block;
+  vertical-align: middle;
+  text-align: center;
+  margin: 0 2px;
+}
+
+/* Numérateur */
+.kwyk-frac-num {
+  display: block;
+  padding: 0 0.3em;
+  border-bottom: 1px solid currentColor;
+  line-height: 1;
+  font-size: 0.85em;
+}
+
+/* Dénominateur */
+.kwyk-frac-den {
+  display: block;
+  padding: 0 0.3em;
+  line-height: 1;
+  font-size: 0.85em;
+}
+
+/* Fractions dans les étapes et formules - taille légèrement réduite */
+.kwyk-step .kwyk-fraction,
+.kwyk-section-formula .kwyk-fraction {
+  font-size: 0.95em;
+}
+
+/* Racine carrée avec barre */
+.kwyk-sqrt {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.kwyk-sqrt-content {
+  display: inline-block;
+  border-top: 1px solid currentColor;
+  padding: 0 0.15em;
+  margin-left: 1px;
+}
+
+/* Fractions à l'intérieur d'une racine : encore plus compactes */
+.kwyk-sqrt .kwyk-fraction {
+  font-size: 0.8em;
+  margin: 0 1px;
+}
+
+.kwyk-sqrt .kwyk-frac-num,
+.kwyk-sqrt .kwyk-frac-den {
+  padding: 0 0.15em;
+  font-size: 1em;
+}
+
+/* Code dans les bulles */
+.kwyk-bubble code {
+  background: #e8eaed;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: #d63384;
+}
+
+/* ===========================================
+   MODE TRICHE - Switch iOS + Status
+   =========================================== */
+
+.kwyk-cheat-mode {
+  padding: 20px 15px;
+  text-align: center;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.kwyk-cheat-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  margin-bottom: 12px;
+}
+
+.kwyk-cheat-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #495057;
+}
+
+/* Switch iOS style */
+.kwyk-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 28px;
+}
+
+.kwyk-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.kwyk-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.3s;
+  border-radius: 28px;
+}
+
+.kwyk-slider:before {
+  position: absolute;
+  content: "";
+  height: 22px;
+  width: 22px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.kwyk-switch input:checked + .kwyk-slider {
+  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+}
+
+.kwyk-switch input:checked + .kwyk-slider:before {
+  transform: translateX(22px);
+}
+
+.kwyk-switch input:focus + .kwyk-slider {
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.3);
+}
+
+/* Status du mode triche */
+.kwyk-cheat-status {
+  font-size: 12px;
+  color: #6c757d;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.kwyk-cheat-status.status-loading {
+  color: #1976d2;
+  background: #e3f2fd;
+  border-color: #90caf9;
+}
+
+.kwyk-cheat-status.status-success {
+  color: #2e7d32;
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  font-weight: 600;
+}
+
+.kwyk-cheat-status.status-error {
+  color: #c62828;
+  background: #ffebee;
+  border-color: #ef9a9a;
+}
+
+/* ===========================================
+   ANIMATION HIGHLIGHT (champs remplis)
+   =========================================== */
+
+@keyframes kwyk-highlight-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+    background-color: rgba(76, 175, 80, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+    background-color: rgba(76, 175, 80, 0.3);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+    background-color: transparent;
+  }
+}
+
+.kwyk-highlight-success {
+  animation: kwyk-highlight-pulse 2s ease-out;
+  border-radius: 4px;
+}
+
+/* ===========================================
+   V12 - STATISTIQUES
+   =========================================== */
+
+.kwyk-stats-section {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-top: 1px solid #e9ecef;
+}
+
+.kwyk-stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kwyk-stats-reset {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #adb5bd;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.kwyk-stats-reset:hover {
+  background: #e9ecef;
+  color: #495057;
+}
+
+.kwyk-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.kwyk-stat {
+  text-align: center;
+  padding: 6px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.kwyk-stat-value {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.kwyk-stat-label {
+  display: block;
+  font-size: 9px;
+  color: #adb5bd;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ===========================================
+   V12 - THEME SOMBRE
+   =========================================== */
+
+[data-theme="dark"] #kwyk-tutor-panel {
+  background: #1a1a2e;
+  color: #eaeaea;
+}
+
+[data-theme="dark"] .kwyk-tutor-header {
+  background: linear-gradient(135deg, #4a4a6a 0%, #2d2d44 100%);
+}
+
+[data-theme="dark"] .kwyk-exercise-preview {
+  background: #2d2d44;
+  border-color: #3d3d5c;
+}
+
+[data-theme="dark"] .kwyk-bubble {
+  background: #2d2d44;
+  color: #eaeaea;
+}
+
+[data-theme="dark"] .kwyk-stats-section {
+  background: #2d2d44;
+  border-color: #3d3d5c;
+}
+
+[data-theme="dark"] .kwyk-stat {
+  background: #1a1a2e;
+}
+
+[data-theme="dark"] .kwyk-stats-header {
+  color: #adb5bd;
+}
+
+[data-theme="dark"] .kwyk-action-btn {
+  background: #3d3d5c;
+  color: #eaeaea;
+}
+
+[data-theme="dark"] .kwyk-action-btn:hover {
+  background: #4a4a6a;
+}
