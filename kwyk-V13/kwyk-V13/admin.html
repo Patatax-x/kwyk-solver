@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kwyk Tutor — Centre de Contrôle</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0f0f1a;
+            color: #eaeaea;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            background: linear-gradient(135deg, #667eea, #e74c3c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 6px;
+        }
+
+        .header p {
+            color: #777;
+            font-size: 14px;
+        }
+
+        /* Cards */
+        .card {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid #2a2a4a;
+        }
+
+        .card h2 {
+            font-size: 16px;
+            color: #667eea;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Inputs */
+        label {
+            display: block;
+            font-size: 13px;
+            color: #999;
+            margin-bottom: 4px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="date"],
+        input[type="time"],
+        input[type="datetime-local"] {
+            width: 100%;
+            padding: 10px 12px;
+            background: #12122a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #eaeaea;
+            font-size: 14px;
+            margin-bottom: 12px;
+            outline: none;
+            transition: border 0.2s;
+        }
+
+        input:focus {
+            border-color: #667eea;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .input-row > div {
+            flex: 1;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .btn-secondary {
+            background: #2a2a4a;
+            color: #ccc;
+        }
+
+        .btn-secondary:hover {
+            background: #3a3a5a;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Status */
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            margin-bottom: 16px;
+        }
+
+        .status.connected {
+            background: rgba(39, 174, 96, 0.15);
+            color: #27ae60;
+        }
+
+        .status.disconnected {
+            background: rgba(231, 76, 60, 0.15);
+            color: #e74c3c;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        /* Table */
+        .periods-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+
+        .periods-table th {
+            text-align: left;
+            font-size: 12px;
+            color: #777;
+            padding: 8px 10px;
+            border-bottom: 1px solid #2a2a4a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .periods-table td {
+            padding: 10px;
+            font-size: 13px;
+            border-bottom: 1px solid #1f1f3a;
+            vertical-align: middle;
+        }
+
+        .periods-table tr:hover td {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .period-label {
+            font-weight: 600;
+            color: #eaeaea;
+        }
+
+        .period-date {
+            color: #aaa;
+        }
+
+        .period-active {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+
+        .period-upcoming {
+            color: #f39c12;
+        }
+
+        .period-past {
+            color: #555;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #555;
+            padding: 32px;
+            font-size: 14px;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.success {
+            background: #27ae60;
+            color: white;
+        }
+
+        .toast.error {
+            background: #e74c3c;
+            color: white;
+        }
+
+        /* Actions bar */
+        .actions-bar {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        /* Add form */
+        .add-form {
+            border-top: 1px solid #2a2a4a;
+            padding-top: 16px;
+            margin-top: 16px;
+        }
+
+        .add-form h3 {
+            font-size: 14px;
+            color: #ccc;
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Kwyk Tutor — Centre de Contrôle</h1>
+            <p>Gérer les plages horaires de blocage de l'extension</p>
+        </div>
+
+        <!-- Connexion GitHub -->
+        <div class="card" id="card-auth">
+            <h2>🔑 Connexion GitHub</h2>
+            <div id="auth-status"></div>
+
+            <label>GitHub Personal Access Token</label>
+            <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+
+            <label>Gist ID</label>
+            <input type="text" id="gist-id" value="41704ea544bc0e2531d20a0d9c9d592e" placeholder="ID du Gist">
+
+            <div class="actions-bar">
+                <button class="btn btn-primary" id="btn-connect" onclick="connect()">Connecter</button>
+            </div>
+        </div>
+
+        <!-- Plages horaires -->
+        <div class="card" id="card-periods" style="display: none;">
+            <h2>📅 Plages de blocage</h2>
+
+            <div id="periods-list"></div>
+
+            <!-- Formulaire d'ajout -->
+            <div class="add-form">
+                <h3>+ Ajouter une plage</h3>
+
+                <label>Nom du contrôle</label>
+                <input type="text" id="new-label" placeholder="Ex: Contrôle de maths">
+
+                <div class="input-row">
+                    <div>
+                        <label>Début</label>
+                        <input type="datetime-local" id="new-start">
+                    </div>
+                    <div>
+                        <label>Fin</label>
+                        <input type="datetime-local" id="new-end">
+                    </div>
+                </div>
+
+                <div class="actions-bar">
+                    <button class="btn btn-secondary" onclick="addPeriod()">Ajouter</button>
+                </div>
+            </div>
+
+            <!-- Sauvegarder -->
+            <div class="actions-bar" style="margin-top: 24px; border-top: 1px solid #2a2a4a; padding-top: 16px;">
+                <button class="btn btn-secondary" onclick="loadFromGist()">Recharger</button>
+                <button class="btn btn-primary" id="btn-save" onclick="saveToGist()">💾 Sauvegarder sur GitHub</button>
+            </div>
+        </div>
+
+        <!-- Mise à jour -->
+        <div class="card" id="card-update" style="display: none;">
+            <h2>🚀 Mise à jour de l'extension</h2>
+            <p style="color: #999; font-size: 13px; margin-bottom: 12px;">
+                Configurez le repo GitHub contenant les fichiers de l'extension.
+                Quand vous changez la version, les utilisateurs verront un bouton de mise à jour.
+            </p>
+
+            <label>Repo GitHub (format: utilisateur/repo)</label>
+            <input type="text" id="update-repo" placeholder="Ex: Patatax-x/kwyk-extension">
+
+            <label>Branche</label>
+            <input type="text" id="update-branch" value="main" placeholder="main">
+
+            <label>Sous-dossier (laisser vide si fichiers à la racine)</label>
+            <input type="text" id="update-path" placeholder="Ex: kwyk-V13">
+
+            <label>Version actuelle</label>
+            <input type="text" id="update-version" placeholder="Ex: 13.1.0">
+
+            <label>Fichiers à mettre à jour</label>
+            <div id="update-files-list" style="margin-bottom: 12px;"></div>
+
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                <input type="text" id="new-update-file" placeholder="Ex: content.js" style="flex: 1;">
+                <button class="btn btn-secondary btn-sm" onclick="addUpdateFile()">+ Ajouter</button>
+            </div>
+
+            <div class="actions-bar">
+                <button class="btn btn-primary" onclick="saveUpdateConfig()">Sauvegarder la config de mise à jour</button>
+            </div>
+        </div>
+
+
+
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let githubToken = '';
+        let gistId = '';
+        let configData = { blocked_periods: [] };
+
+        // Init: charger depuis localStorage
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedToken = localStorage.getItem('kwyk_admin_token');
+            const savedGistId = localStorage.getItem('kwyk_admin_gist_id');
+
+            if (savedToken) document.getElementById('github-token').value = savedToken;
+            if (savedGistId) document.getElementById('gist-id').value = savedGistId;
+
+            // Auto-connect si les deux sont sauvegardés
+            if (savedToken && savedGistId) {
+                connect();
+            }
+        });
+
+        // Connexion au Gist
+        async function connect() {
+            githubToken = document.getElementById('github-token').value.trim();
+            gistId = document.getElementById('gist-id').value.trim();
+
+            if (!githubToken || !gistId) {
+                showToast('Remplissez le token et le Gist ID', 'error');
+                return;
+            }
+
+            // Sauvegarder en localStorage
+            localStorage.setItem('kwyk_admin_token', githubToken);
+            localStorage.setItem('kwyk_admin_gist_id', gistId);
+
+            // Tester la connexion
+            document.getElementById('btn-connect').disabled = true;
+            document.getElementById('btn-connect').textContent = 'Connexion...';
+
+            try {
+                await loadFromGist();
+                document.getElementById('auth-status').innerHTML =
+                    '<div class="status connected"><span class="status-dot"></span> Connecté au Gist</div>';
+                document.getElementById('card-periods').style.display = 'block';
+                document.getElementById('card-update').style.display = 'block';
+                updateUpdateDisplay();
+                showToast('Connecté avec succès !', 'success');
+            } catch (error) {
+                document.getElementById('auth-status').innerHTML =
+                    '<div class="status disconnected"><span class="status-dot"></span> Erreur de connexion</div>';
+                showToast('Erreur: ' + error.message, 'error');
+            }
+
+            document.getElementById('btn-connect').disabled = false;
+            document.getElementById('btn-connect').textContent = 'Connecter';
+        }
+
+        // Charger la config depuis le Gist
+        async function loadFromGist() {
+            const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+                headers: { 'Authorization': `token ${githubToken}` }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} - Vérifiez le token et le Gist ID`);
+            }
+
+            const gist = await response.json();
+            const file = gist.files['kwyk-config.json'];
+
+            if (!file) {
+                throw new Error('Fichier kwyk-config.json non trouvé dans le Gist');
+            }
+
+            configData = JSON.parse(file.content);
+            if (!configData.blocked_periods) {
+                configData.blocked_periods = [];
+            }
+
+            renderPeriods();
+        }
+
+        // Sauvegarder la config vers le Gist
+        async function saveToGist() {
+            const btn = document.getElementById('btn-save');
+            btn.disabled = true;
+            btn.textContent = 'Sauvegarde...';
+
+            try {
+                const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `token ${githubToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        files: {
+                            'kwyk-config.json': {
+                                content: JSON.stringify(configData, null, 2)
+                            }
+                        }
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                showToast('Config sauvegardée sur GitHub !', 'success');
+            } catch (error) {
+                showToast('Erreur sauvegarde: ' + error.message, 'error');
+            }
+
+            btn.disabled = false;
+            btn.textContent = '💾 Sauvegarder sur GitHub';
+        }
+
+        // Ajouter une plage
+        function addPeriod() {
+            const label = document.getElementById('new-label').value.trim();
+            const start = document.getElementById('new-start').value;
+            const end = document.getElementById('new-end').value;
+
+            if (!label || !start || !end) {
+                showToast('Remplissez tous les champs', 'error');
+                return;
+            }
+
+            if (new Date(start) >= new Date(end)) {
+                showToast('La date de fin doit être après la date de début', 'error');
+                return;
+            }
+
+            configData.blocked_periods.push({ start, end, label });
+
+            // Trier par date de début
+            configData.blocked_periods.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+            // Reset le formulaire
+            document.getElementById('new-label').value = '';
+            document.getElementById('new-start').value = '';
+            document.getElementById('new-end').value = '';
+
+            renderPeriods();
+            showToast('Plage ajoutée (pensez à sauvegarder)', 'success');
+        }
+
+        // Supprimer une plage
+        function removePeriod(index) {
+            configData.blocked_periods.splice(index, 1);
+            renderPeriods();
+            showToast('Plage supprimée (pensez à sauvegarder)', 'success');
+        }
+
+        // Afficher les plages
+        function renderPeriods() {
+            const container = document.getElementById('periods-list');
+            const periods = configData.blocked_periods;
+
+            if (periods.length === 0) {
+                container.innerHTML = '<div class="empty-state">Aucune plage de blocage définie</div>';
+                return;
+            }
+
+            const now = new Date();
+
+            let html = `
+                <table class="periods-table">
+                    <thead>
+                        <tr>
+                            <th>Contrôle</th>
+                            <th>Début</th>
+                            <th>Fin</th>
+                            <th>Statut</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            periods.forEach((period, index) => {
+                const start = new Date(period.start);
+                const end = new Date(period.end);
+
+                let statusClass = 'period-upcoming';
+                let statusText = 'A venir';
+
+                if (now >= start && now <= end) {
+                    statusClass = 'period-active';
+                    statusText = '🔴 ACTIF';
+                } else if (now > end) {
+                    statusClass = 'period-past';
+                    statusText = 'Passé';
+                }
+
+                const formatDate = (d) => d.toLocaleDateString('fr-FR', {
+                    day: '2-digit', month: '2-digit', year: 'numeric'
+                });
+                const formatTime = (d) => d.toLocaleTimeString('fr-FR', {
+                    hour: '2-digit', minute: '2-digit'
+                });
+
+                html += `
+                    <tr>
+                        <td class="period-label">${period.label}</td>
+                        <td class="period-date">${formatDate(start)} ${formatTime(start)}</td>
+                        <td class="period-date">${formatDate(end)} ${formatTime(end)}</td>
+                        <td class="${statusClass}">${statusText}</td>
+                        <td><button class="btn btn-danger btn-sm" onclick="removePeriod(${index})">✕</button></td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        // ===== MISE À JOUR =====
+
+        function updateUpdateDisplay() {
+            document.getElementById('update-repo').value = configData.update_repo || '';
+            document.getElementById('update-branch').value = configData.update_branch || 'main';
+            document.getElementById('update-path').value = configData.update_path || '';
+            document.getElementById('update-version').value = configData.version || '';
+            renderUpdateFiles();
+        }
+
+        function renderUpdateFiles() {
+            const container = document.getElementById('update-files-list');
+            const files = configData.update_files || [];
+
+            if (files.length === 0) {
+                container.innerHTML = '<div style="color: #555; font-size: 13px; padding: 8px 0;">Aucun fichier configuré</div>';
+                return;
+            }
+
+            container.innerHTML = files.map((file, i) => `
+                <div style="display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #12122a; border-radius: 6px; margin-bottom: 4px;">
+                    <code style="flex: 1; font-size: 13px; color: #667eea;">${file}</code>
+                    <button class="btn btn-danger btn-sm" onclick="removeUpdateFile(${i})" style="padding: 2px 8px; font-size: 11px;">✕</button>
+                </div>
+            `).join('');
+        }
+
+        function addUpdateFile() {
+            const input = document.getElementById('new-update-file');
+            const file = input.value.trim();
+            if (!file) return;
+
+            if (!configData.update_files) configData.update_files = [];
+            if (configData.update_files.includes(file)) {
+                showToast('Fichier déjà dans la liste', 'error');
+                return;
+            }
+
+            configData.update_files.push(file);
+            input.value = '';
+            renderUpdateFiles();
+        }
+
+        function removeUpdateFile(index) {
+            configData.update_files.splice(index, 1);
+            renderUpdateFiles();
+        }
+
+        async function saveUpdateConfig() {
+            configData.update_repo = document.getElementById('update-repo').value.trim();
+            configData.update_branch = document.getElementById('update-branch').value.trim() || 'main';
+            configData.update_path = document.getElementById('update-path').value.trim();
+            configData.version = document.getElementById('update-version').value.trim();
+
+            await saveToGist();
+            showToast('Config de mise à jour sauvegardée !', 'success');
+        }
+
+        // Toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+    </script>
+</body>
+</html>
