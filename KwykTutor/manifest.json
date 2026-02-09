@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Kwyk Tutor V13",
-  "version": "13.0.0",
-  "description": "Assistant pedagogique pour les exercices de maths sur Kwyk.fr - Version 13",
-  "author": "Morgan Bouchon",
+  "name": "Kwyk Tutor",
+  "version": "1.0.0",
+  "description": "Assistant pedagogique pour les exercices de maths sur Kwyk.fr",
+  "author": "Patatax",
 
   "permissions": [
     "storage",
