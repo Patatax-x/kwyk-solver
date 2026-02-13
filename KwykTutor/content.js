@@ -174,8 +174,8 @@
             }
 
 
-            // Vérifier la version (notification, pas blocage)
-            if (remoteConfig.version && remoteConfig.version !== LOCAL_VERSION) {
+            // Vérifier la version (seulement si update_enabled est actif)
+            if (remoteConfig.update_enabled !== false && remoteConfig.version && remoteConfig.version !== LOCAL_VERSION) {
                 // Vérifier si l'utilisateur a déjà fait cette mise à jour
                 const stored = await new Promise(r => chrome.storage.local.get('kwykLastUpdate', r));
                 if (stored.kwykLastUpdate === remoteConfig.version) {
@@ -1658,11 +1658,20 @@
 
         console.log('[Kwyk Tutor] Checkboxes trouvées:', checkboxes.length);
 
-        // Les réponses multiples sont séparées par des virgules
-        const answers = reponse.reponse.split(',').map(a => a.trim().toLowerCase());
+        // Construire la liste de réponses à cocher
+        // D'abord essayer de matcher le texte complet comme un seul label (ex: "Ni constante, ni linéaire")
+        // Si aucun match exact, alors splitter sur les virgules
+        const fullAnswer = reponse.reponse.trim().toLowerCase();
+        const checkboxLabels = Array.from(checkboxes).map(cb =>
+            (cb.labels?.[0]?.textContent.trim().toLowerCase() || cb.parentElement.textContent.trim().toLowerCase())
+        );
+        const hasExactFullMatch = checkboxLabels.some(label => label === fullAnswer);
+        const answers = hasExactFullMatch
+            ? [fullAnswer]
+            : reponse.reponse.split(',').map(a => a.trim().toLowerCase());
         let filled = false;
 
-        console.log('[Kwyk Tutor] Réponses à cocher:', answers);
+        console.log('[Kwyk Tutor] Réponses à cocher:', answers, hasExactFullMatch ? '(match exact complet)' : '(split virgule)');
 
         // Construire un map des options avec leur index (A=0, B=1, C=2, D=3)
         const checkboxArray = Array.from(checkboxes);
@@ -1761,9 +1770,6 @@
             'placer les points',
             'glisser-déposer',
             'faire glisser',
-            'coefficient directeur de la droite suivante',
-            'représentation graphique',
-            'représentations graphiques',
         ];
 
         const exerciseText = currentExercise.texte.toLowerCase();
@@ -1955,6 +1961,39 @@
             table.replaceWith(document.createTextNode(tableText));
         });
 
+        // V14: Extraire les fonctions des graphiques Raphaël (représentations graphiques)
+        // Les graphes Raphaël contiennent un JSON avec "plot": [["function(x){ return ...}", [min, max]]]
+        // On remplace tout le bloc SVG + JSON par un texte lisible "Graphique X : y = ..."
+        const graphSpans = clonedBlock.querySelectorAll('span');
+        let graphLetterIndex = 0;
+        const graphLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        graphSpans.forEach(span => {
+            const text = span.textContent || '';
+            const jsonMatch = text.match(/\{"init"\s*:\s*\{.*?"plot"\s*:\s*\[.*?\]\s*\}/s);
+            if (jsonMatch) {
+                try {
+                    const config = JSON.parse(jsonMatch[0]);
+                    if (config.plot && config.plot.length > 0) {
+                        const funcStr = config.plot[0][0]; // "function(x){ return -x - 3;}"
+                        const exprMatch = funcStr.match(/return\s+(.+?)\s*;?\s*\}/);
+                        if (exprMatch) {
+                            const letter = graphLetters[graphLetterIndex] || (graphLetterIndex + 1);
+                            const cleanExpr = exprMatch[1].replace(/\s+/g, ' ').trim();
+                            span.textContent = `\n[Graphique ${letter} : y = ${cleanExpr}]\n`;
+                            graphLetterIndex++;
+                        }
+                    }
+                } catch(e) {
+                    // JSON invalide, on laisse tel quel
+                }
+            }
+        });
+        // Nettoyer les résidus Raphaël (numéros d'axes, "Created with Raphaël X.X.X")
+        // S'applique seulement si des graphiques ont été détectés
+        if (graphLetterIndex > 0) {
+            clonedBlock.querySelectorAll('svg').forEach(svg => svg.remove());
+        }
+
         // Remplacer les éléments MathJax par leur texte DANS le clone
         // Ainsi √2 apparaîtra inline au bon endroit dans le texte
         clonedBlock.querySelectorAll('mjx-container').forEach(container => {
@@ -1978,8 +2017,10 @@
         });
 
         const plainText = clonedBlock.textContent.trim()
+            .replace(/Created with Raphaël \d+\.\d+\.\d+/g, '') // Nettoyer résidus Raphaël
+            .replace(/\d+-\d+-\d+-\d+/g, '') // Nettoyer numéros d'axes concaténés
             .replace(/\s+/g, ' ')
-            .substring(0, 500);
+            .substring(0, 1000);
 
         question.context = plainText;
         question.label = plainText.substring(0, 200) || `Question ${index + 1}`;
@@ -2253,6 +2294,15 @@ TABLEAUX DE VARIATIONS (V14):
   - Après ↗ → valeur en haut (la fonction vient de monter)
   - Avant ↘ → valeur en haut (la fonction va descendre)
   - Après ↘ → valeur en bas (la fonction vient de descendre)
+
+REPRÉSENTATIONS GRAPHIQUES:
+- Les graphiques sont décrits sous la forme [Graphique A : y = expression]. Analyse l'expression pour identifier le type de fonction.
+- RAPPEL MATHÉMATIQUE IMPORTANT (inclusions de fonctions):
+  * Une fonction CONSTANTE f(x) = k est un CAS PARTICULIER de fonction AFFINE (avec a=0)
+  * Une fonction LINÉAIRE f(x) = ax est un CAS PARTICULIER de fonction AFFINE (avec b=0)
+  * Donc si on demande "constante ET/OU affine ?", une constante est AUSSI affine → coche les DEUX
+  * Si on demande "linéaire ET/OU affine ?", une linéaire est AUSSI affine → coche les DEUX
+- Pour les QCM de type de fonction, prends en compte ces INCLUSIONS
 
 TABLEAUX DE VALEURS:
 - Les tableaux de valeurs sont présentés entre [Tableau] et [/Tableau] avec des colonnes séparées par |
@@ -2876,6 +2926,13 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
     /**
      * V14: Affiche un tableau de signes/variation structuré
      */
+    /**
+     * Convertit la notation (a)/(b) en fraction HTML <sup>a</sup>&frasl;<sub>b</sub>
+     */
+    function formatFractionHtml(str) {
+        return String(str).replace(/\(([^)]+)\)\/\(([^)]+)\)/g, '<sup>$1</sup>&frasl;<sub>$2</sub>');
+    }
+
     function renderSignTable(tableau) {
         let html = '<div class="kwyk-sign-table-wrapper">';
         html += '<table class="kwyk-sign-table">';
@@ -2883,14 +2940,14 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
         // Ligne d'en-tête (valeurs de x)
         html += '<tr class="kwyk-sign-table-header">';
         tableau.headers.forEach(h => {
-            html += `<th>${escapeHtml(String(h))}</th>`;
+            html += `<th>${formatFractionHtml(escapeHtml(String(h)))}</th>`;
         });
         html += '</tr>';
 
         // Lignes de signes/variations
         tableau.rows.forEach(row => {
             html += '<tr>';
-            html += `<td class="kwyk-sign-table-label">${escapeHtml(String(row.label))}</td>`;
+            html += `<td class="kwyk-sign-table-label">f(x)</td>`;
             (row.values || []).forEach(v => {
                 const val = String(v);
                 let cls = '';
@@ -2938,7 +2995,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
                 html += '<th></th>';
             } else {
                 const label = boundIdx < boundaries.length ? boundaries[boundIdx] : '';
-                html += `<th>${escapeHtml(String(label))}</th>`;
+                html += `<th>${formatFractionHtml(escapeHtml(String(label)))}</th>`;
                 boundIdx++;
             }
         }
