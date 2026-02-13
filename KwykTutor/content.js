@@ -1,9 +1,16 @@
 /**
- * Kwyk Tutor - Version 12 (V12)
+ * Kwyk Tutor - Version 14 (V14)
  * =============================
- * VERSION MAJEURE - Refonte complète
+ * Support des tableaux de valeurs
  *
- * Nouveautés V12:
+ * Nouveautés V14:
+ * - FEATURE: Support des tableaux de valeurs (prettytable) - formatage pour l'IA
+ * - FEATURE: Tableaux de valeurs retirés de la liste des exercices non supportés
+ * - FEATURE: Prompt IA amélioré pour les calculs sur tableaux
+ * - FIX: MutationObserver amélioré - détecte les changements d'exercice graphiques/tableaux
+ *   (ajout node.matches + sélecteurs table/canvas/svg/jxgbox)
+ *
+ * Historique V12:
  * - FIX CRITIQUE: MathQuill utilise write() au lieu de latex() pour préserver le format
  *   (latex() convertissait \mathbb{R} en ℝ Unicode → Kwyk comptait faux)
  * - FEATURE: Sélection du modèle IA (small/medium/large)
@@ -53,7 +60,7 @@
  * - Retry 3x en cas d'erreur API
  *
  * v16:
- * - Mode pédagogique: bouton Réponse masqué
+ * - Mode pédagogique: tous les boutons visibles
  * - Encadré réponse retiré de l'onglet Explique
  *
  * v15:
@@ -67,13 +74,13 @@
 (function() {
     'use strict';
 
-    console.log('[Kwyk Tutor] === Démarrage V12 - Version majeure ===');
+    console.log('[Kwyk Tutor] === Démarrage V14 - Support tableaux ===');
 
     // Config
     let config = {
         mistralApiKey: '',
         model: 'mistral-medium-latest',
-        mode: 'pedagogique',  // 'pedagogique', 'direct' ou 'triche'
+        mode: 'pedagogique',  // 'pedagogique' ou 'triche'
         cheatAutoValidate: false,
         cheatAutoNext: false,
         sounds: true,  // V12: Notifications sonores
@@ -177,6 +184,7 @@
                     console.log('[Kwyk Tutor] ℹ️ Mise à jour disponible:', remoteConfig.version);
                     window._kwykUpdateAvailable = remoteConfig.version;
                     window._kwykUpdateConfig = remoteConfig;
+                    window._kwykUpdateChangelog = remoteConfig.changelog || [];
                 }
             }
 
@@ -347,15 +355,39 @@
             return; // Ne PAS initialiser le reste (détection, observer, etc.)
         }
 
-        // Afficher la bannière de mise à jour si disponible
+        // Afficher la bannière de mise à jour si disponible (OBLIGATOIRE)
         if (window._kwykUpdateAvailable) {
             const panel = document.getElementById('kwyk-tutor-panel');
             if (panel) {
+                // Masquer tout le contenu du panneau sauf le header
+                const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-unsupported', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
+                elementsToHide.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+
+                // Construire le changelog HTML
+                const changelog = window._kwykUpdateChangelog || [];
+                let changelogHTML = '';
+                if (changelog.length > 0) {
+                    changelogHTML = `
+                        <div class="kwyk-update-changelog">
+                            <div class="kwyk-update-changelog-title">Nouveautés :</div>
+                            <ul class="kwyk-update-changelog-list">
+                                ${changelog.map(item => `<li>${item}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }
+
                 const banner = document.createElement('div');
                 banner.id = 'kwyk-update-banner';
                 banner.innerHTML = `
-                    <span>Mise à jour v${window._kwykUpdateAvailable} disponible</span>
-                    <button id="kwyk-update-link">Mettre à jour</button>
+                    <div class="kwyk-update-banner-header">
+                        <span>Mise à jour v${window._kwykUpdateAvailable} requise</span>
+                        <button id="kwyk-update-link">Mettre à jour</button>
+                    </div>
+                    ${changelogHTML}
                 `;
                 const header = panel.querySelector('.kwyk-tutor-header');
                 if (header) {
@@ -365,6 +397,9 @@
                     performInlineUpdate();
                 });
             }
+            // Ne PAS continuer l'initialisation normale (pas de détection, pas d'observer)
+            console.log('[Kwyk Tutor] Extension bloquée en attente de mise à jour');
+            return;
         }
 
         updateButtonsForMode();
@@ -436,7 +471,8 @@
                 if (mutation.addedNodes.length > 0) {
                     for (const node of mutation.addedNodes) {
                         if (node.nodeType === 1) {
-                            if (node.querySelector?.('mjx-container, math, input[type="radio"], input[type="text"]') ||
+                            if (node.matches?.('mjx-container, math, table, canvas, svg, .exercise_question') ||
+                                node.querySelector?.('mjx-container, math, input[type="radio"], input[type="text"], table, canvas, svg, .jxgbox, .exercise_question') ||
                                 node.classList?.contains('exercise') ||
                                 node.classList?.contains('exercise_question') ||
                                 node.classList?.contains('question')) {
@@ -655,12 +691,10 @@
 
     /**
      * Met à jour l'affichage des boutons selon le mode
-     * - Pédagogique: cache le bouton Réponse
-     * - Direct: tous les boutons visibles
+     * - Pédagogique: tous les boutons visibles
      * - Triche: cache tous les boutons, affiche le switch
      */
     function updateButtonsForMode() {
-        const btnAnswer = document.getElementById('btn-answer');
         const actionsEl = document.getElementById('kwyk-actions');
         const cheatSection = document.getElementById('kwyk-cheat-section');
         const responseEl = document.getElementById('kwyk-response');
@@ -672,20 +706,11 @@
             if (responseEl) responseEl.style.display = 'none';
             console.log('[Kwyk Tutor] Mode triche: switch activé');
         } else {
-            // Modes pédagogique/direct: afficher les boutons, cacher le switch
+            // Mode pédagogique: afficher les boutons, cacher le switch
             if (actionsEl) actionsEl.style.display = 'flex';
             if (cheatSection) cheatSection.style.display = 'none';
             if (responseEl) responseEl.style.display = 'block';
-
-            if (btnAnswer) {
-                if (config.mode === 'pedagogique') {
-                    btnAnswer.style.display = 'none';
-                    console.log('[Kwyk Tutor] Mode pédagogique: bouton Réponse masqué');
-                } else {
-                    btnAnswer.style.display = 'block';
-                    console.log('[Kwyk Tutor] Mode direct: bouton Réponse visible');
-                }
-            }
+            console.log('[Kwyk Tutor] Mode pédagogique: tous les boutons visibles');
         }
     }
 
@@ -1729,17 +1754,16 @@
     function checkUnsupportedExercise(autoSkip = false) {
         if (!currentExercise) return false;
 
-        // V12: Tableaux de variation/signes maintenant partiellement supportés
-        // Seuls les exercices graphiques restent non supportés
+        // V14: Tableaux de valeurs/variation/signes maintenant supportés
+        // Seuls les exercices graphiques et drag&drop restent non supportés
         const unsupportedKeywords = [
-            'tableau de valeurs',
-            'représentation graphique',
             'tracer la courbe',
             'placer les points',
-            'lire graphiquement',
-            'sur le graphique',
             'glisser-déposer',
-            'faire glisser'
+            'faire glisser',
+            'coefficient directeur de la droite suivante',
+            'représentation graphique',
+            'représentations graphiques',
         ];
 
         const exerciseText = currentExercise.texte.toLowerCase();
@@ -1919,6 +1943,17 @@
         // Cloner le bloc pour manipulation
         const clonedBlock = block.cloneNode(true);
         clonedBlock.querySelectorAll('label').forEach(l => l.remove());
+
+        // V14: Formater les tableaux prettytable pour l'IA
+        clonedBlock.querySelectorAll('table.prettytable').forEach(table => {
+            const rows = [...table.querySelectorAll('tr')];
+            const formattedRows = rows.map(row => {
+                const cells = [...row.querySelectorAll('th, td')];
+                return cells.map(cell => cell.textContent.trim()).join(' | ');
+            });
+            const tableText = '\n[Tableau]\n' + formattedRows.join('\n') + '\n[/Tableau]\n';
+            table.replaceWith(document.createTextNode(tableText));
+        });
 
         // Remplacer les éléments MathJax par leur texte DANS le clone
         // Ainsi √2 apparaîtra inline au bon endroit dans le texte
@@ -2182,11 +2217,47 @@ DOMAINES DE DÉFINITION (lis bien l'énoncé !):
 - Si l'énoncé demande "INTERVALLE" → notation INTERVALLE: ]-∞;4[∪]4;+∞[
 - Pour les ensembles, utilise le format ℝ{valeur} - le programme convertira automatiquement
 
-TABLEAUX DE VARIATION / SIGNES (V12):
-- Pour les tableaux, donne CHAQUE valeur à remplir dans une réponse séparée
+TABLEAUX DE SIGNES (V14):
+- Pour les tableaux de SIGNES, donne CHAQUE valeur à remplir dans une réponse séparée (une string par case)
 - Utilise + pour positif, - pour négatif, 0 pour nul
-- Utilise ↗ pour croissant, ↘ pour décroissant
 - Numérote les cases de gauche à droite, haut en bas
+- IMPORTANT: chaque élément de "reponses" doit avoir un champ "reponse" (string), PAS un sous-tableau d'objets
+  Exemple correct: {"question": 1, "type": "input", "reponse": "+"}
+  Exemple INCORRECT: {"question": 1, "reponses": [{"case": 1, "valeur": "+"}]}
+- EN PLUS, ajoute un champ "tableau" à la RACINE du JSON (même niveau que notion/methode/etapes/reponses) :
+  "tableau": {
+    "type": "signes",
+    "headers": ["x", "-∞", "valeur1", "+∞"],
+    "rows": [
+      {"label": "2x+6", "values": ["-", "0", "+", "+"]}
+    ]
+  }
+  Ce champ sert uniquement à l'affichage structuré. Le champ "reponses" reste obligatoire.
+
+TABLEAUX DE VARIATIONS (V14):
+- Pour les tableaux de VARIATIONS (sens de variation d'une fonction), donne TOUTES les valeurs attendues par Kwyk dans "reponses" : valeurs numériques aux bornes, aux extremums, ET les flèches ↗/↘
+- Numérote les cases de gauche à droite, haut en bas
+- IMPORTANT: chaque élément de "reponses" doit avoir un champ "reponse" (string)
+  Exemples: {"question": 1, "type": "input", "reponse": "-19"}, {"question": 2, "type": "input", "reponse": "↗"}, {"question": 3, "type": "input", "reponse": "30"}
+- EN PLUS, ajoute un champ "tableau" à la RACINE du JSON :
+  "tableau": {
+    "type": "variation",
+    "headers": ["x", "-3", "4"],
+    "rows": [
+      {"label": "f(x)", "values": ["-19", "↗", "30"]}
+    ]
+  }
+  Convention : les values alternent entre valeurs numériques et flèches (↗ ou ↘).
+  La position haut/bas est déduite automatiquement par l'extension :
+  - Avant ↗ → valeur en bas (la fonction va monter)
+  - Après ↗ → valeur en haut (la fonction vient de monter)
+  - Avant ↘ → valeur en haut (la fonction va descendre)
+  - Après ↘ → valeur en bas (la fonction vient de descendre)
+
+TABLEAUX DE VALEURS:
+- Les tableaux de valeurs sont présentés entre [Tableau] et [/Tableau] avec des colonnes séparées par |
+- Pour un tableau de valeurs avec un ? (valeur manquante), calcule la valeur et donne UNIQUEMENT le résultat numérique
+- Exemple: si le tableau montre une fonction linéaire f avec f(-8)=-2 et on demande f(-6), calcule le coefficient puis la valeur
 
 `;
 
@@ -2402,24 +2473,42 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
             reponses: []
         };
 
+        // V14: Préserver le champ tableau pour l'affichage structuré
+        if (parsed.tableau && parsed.tableau.headers && Array.isArray(parsed.tableau.rows)) {
+            solution.tableau = parsed.tableau;
+        }
+
         // Gérer les réponses (simple ou multiple)
         if (Array.isArray(parsed.reponses)) {
             parsed.reponses.forEach(r => {
-                // Si "reponses" (pluriel) au lieu de "reponse" (singulier) → QCM multiple
+                // Si "reponses" (pluriel) au lieu de "reponse" (singulier) → QCM multiple ou tableau objets
                 if (r.reponses && Array.isArray(r.reponses)) {
-                    // QCM avec plusieurs réponses : ["A.xxx", "B.yyy", "D.zzz"]
-                    // Extraire juste les lettres : "A, B, D"
-                    const lettres = r.reponses.map(rep => {
-                        const match = rep.match(/^([A-Z])\./);
-                        return match ? match[1] : rep;
-                    }).join(', ');
+                    // V14: Si c'est un tableau d'objets {case, valeur}, extraire les valeurs en réponses individuelles
+                    if (r.reponses.length > 0 && typeof r.reponses[0] === 'object' && r.reponses[0].valeur !== undefined) {
+                        r.reponses.forEach((item, idx) => {
+                            solution.reponses.push({
+                                question: r.question ? `${r.question}.${idx + 1}` : idx + 1,
+                                type: r.type || 'input',
+                                reponse: validateReponse(String(item.valeur)),
+                                explication: r.explication || ''
+                            });
+                        });
+                    } else {
+                        // QCM avec plusieurs réponses : ["A.xxx", "B.yyy", "D.zzz"]
+                        // Extraire juste les lettres : "A, B, D"
+                        const lettres = r.reponses.map(rep => {
+                            if (typeof rep !== 'string') return String(rep);
+                            const match = rep.match(/^([A-Z])\./);
+                            return match ? match[1] : rep;
+                        }).join(', ');
 
-                    solution.reponses.push({
-                        question: r.question,
-                        type: r.type || 'qcm',
-                        reponse: validateReponse(lettres),
-                        explication: r.explication || ''
-                    });
+                        solution.reponses.push({
+                            question: r.question,
+                            type: r.type || 'qcm',
+                            reponse: validateReponse(lettres),
+                            explication: r.explication || ''
+                        });
+                    }
                 } else if (r.reponse) {
                     // QCM classique avec une seule réponse - VALIDER la réponse
                     const cleanReponse = validateReponse(r.reponse);
@@ -2644,7 +2733,15 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
                 break;
 
             case 'answer':
-                html = renderSingleAnswer(reponse, question);
+                if (s.tableau) {
+                    if (s.tableau.type === 'variation') {
+                        html = renderVariationTable(s.tableau);
+                    } else {
+                        html = renderSignTable(s.tableau);
+                    }
+                } else {
+                    html = renderSingleAnswer(reponse, question);
+                }
                 break;
         }
 
@@ -2704,7 +2801,15 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
                 break;
 
             case 'answer':
-                html = renderAllAnswers(s.reponses);
+                if (s.tableau) {
+                    if (s.tableau.type === 'variation') {
+                        html = renderVariationTable(s.tableau);
+                    } else {
+                        html = renderSignTable(s.tableau);
+                    }
+                } else {
+                    html = renderAllAnswers(s.reponses);
+                }
                 break;
         }
 
@@ -2765,6 +2870,142 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
         });
 
         html += '</div>';
+        return html;
+    }
+
+    /**
+     * V14: Affiche un tableau de signes/variation structuré
+     */
+    function renderSignTable(tableau) {
+        let html = '<div class="kwyk-sign-table-wrapper">';
+        html += '<table class="kwyk-sign-table">';
+
+        // Ligne d'en-tête (valeurs de x)
+        html += '<tr class="kwyk-sign-table-header">';
+        tableau.headers.forEach(h => {
+            html += `<th>${escapeHtml(String(h))}</th>`;
+        });
+        html += '</tr>';
+
+        // Lignes de signes/variations
+        tableau.rows.forEach(row => {
+            html += '<tr>';
+            html += `<td class="kwyk-sign-table-label">${escapeHtml(String(row.label))}</td>`;
+            (row.values || []).forEach(v => {
+                const val = String(v);
+                let cls = '';
+                if (val === '+') cls = 'sign-pos';
+                else if (val === '-' || val === '\u2212') cls = 'sign-neg';
+                else if (val === '0') cls = 'sign-zero';
+                else if (val === '↗') cls = 'sign-up';
+                else if (val === '↘') cls = 'sign-down';
+                else if (val === '||') cls = 'sign-forbidden';
+                html += `<td class="kwyk-sign-table-val ${cls}">${escapeHtml(val)}</td>`;
+            });
+            html += '</tr>';
+        });
+
+        html += '</table></div>';
+        return html;
+    }
+
+    /**
+     * V14: Affiche un tableau de variations avec positionnement haut/bas des valeurs
+     * Les valeurs alternent avec les flèches dans row.values.
+     * Position déduite : avant ↗ = bas, après ↗ = haut, avant ↘ = haut, après ↘ = bas.
+     */
+    function renderVariationTable(tableau) {
+        const headers = tableau.headers || [];
+        const rows = tableau.rows || [];
+        // Bornes = headers sans le premier élément "x" (qui est le label de la ligne d'en-tête)
+        const boundaries = headers.slice(1);
+
+        // Utiliser la première row pour construire les en-têtes expandés
+        // On insère un <th> vide pour chaque flèche dans values
+        const firstValues = rows.length > 0 ? (rows[0].values || []) : [];
+
+        let html = '<div class="kwyk-variation-table-wrapper">';
+        html += '<table class="kwyk-variation-table">';
+
+        // Ligne d'en-tête — première colonne "x", puis une colonne par valeur dans values
+        // Les flèches reçoivent un <th> vide, les valeurs numériques reçoivent la borne correspondante
+        html += '<tr class="kwyk-variation-header">';
+        html += `<th>${escapeHtml(String(headers[0] || 'x'))}</th>`;
+        let boundIdx = 0;
+        for (let i = 0; i < firstValues.length; i++) {
+            const val = String(firstValues[i]);
+            if (val === '↗' || val === '↘') {
+                html += '<th></th>';
+            } else {
+                const label = boundIdx < boundaries.length ? boundaries[boundIdx] : '';
+                html += `<th>${escapeHtml(String(label))}</th>`;
+                boundIdx++;
+            }
+        }
+        html += '</tr>';
+
+        // Lignes de variation (chaque row génère 3 sous-lignes : haut, flèche, bas)
+        rows.forEach(row => {
+            const values = row.values || [];
+
+            // Déterminer la position (haut/bas) de chaque valeur
+            const positions = [];
+            for (let i = 0; i < values.length; i++) {
+                const val = String(values[i]);
+                if (val === '↗' || val === '↘') {
+                    positions.push('arrow');
+                } else {
+                    const nextVal = i + 1 < values.length ? String(values[i + 1]) : null;
+                    const prevVal = i - 1 >= 0 ? String(values[i - 1]) : null;
+
+                    if (nextVal === '↗' || prevVal === '↘') {
+                        positions.push('low');
+                    } else if (nextVal === '↘' || prevVal === '↗') {
+                        positions.push('high');
+                    } else {
+                        positions.push('high');
+                    }
+                }
+            }
+
+            // Sous-ligne haute (avec label f(x) en rowspan=3)
+            html += '<tr class="kwyk-variation-row-high">';
+            html += `<td class="kwyk-variation-label" rowspan="3">${escapeHtml(String(row.label))}</td>`;
+            for (let i = 0; i < values.length; i++) {
+                if (positions[i] === 'high') {
+                    html += `<td class="kwyk-variation-val high">${escapeHtml(String(values[i]))}</td>`;
+                } else {
+                    html += '<td class="kwyk-variation-empty"></td>';
+                }
+            }
+            html += '</tr>';
+
+            // Sous-ligne flèche
+            html += '<tr class="kwyk-variation-row-arrow">';
+            for (let i = 0; i < values.length; i++) {
+                const val = String(values[i]);
+                if (positions[i] === 'arrow') {
+                    const arrowCls = val === '↗' ? 'arrow-up' : 'arrow-down';
+                    html += `<td class="kwyk-variation-arrow ${arrowCls}">${escapeHtml(val)}</td>`;
+                } else {
+                    html += '<td class="kwyk-variation-empty"></td>';
+                }
+            }
+            html += '</tr>';
+
+            // Sous-ligne basse
+            html += '<tr class="kwyk-variation-row-low">';
+            for (let i = 0; i < values.length; i++) {
+                if (positions[i] === 'low') {
+                    html += `<td class="kwyk-variation-val low">${escapeHtml(String(values[i]))}</td>`;
+                } else {
+                    html += '<td class="kwyk-variation-empty"></td>';
+                }
+            }
+            html += '</tr>';
+        });
+
+        html += '</table></div>';
         return html;
     }
 

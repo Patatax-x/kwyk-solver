@@ -9,7 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const apiKeyInput = document.getElementById('api-key');
     const modelSelect = document.getElementById('model');
     const optPedagogique = document.getElementById('opt-pedagogique');
-    const optDirect = document.getElementById('opt-direct');
     const optTriche = document.getElementById('opt-triche');
     const btnTest = document.getElementById('btn-test');
     const btnSave = document.getElementById('btn-save');
@@ -27,7 +26,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Evenements
     optPedagogique.addEventListener('click', () => selectMode('pedagogique'));
-    optDirect.addEventListener('click', () => selectMode('direct'));
     optTriche.addEventListener('click', () => selectMode('triche'));
     btnTest.addEventListener('click', testConnection);
     btnSave.addEventListener('click', saveConfig);
@@ -75,10 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function selectMode(mode) {
         optPedagogique.classList.toggle('selected', mode === 'pedagogique');
-        optDirect.classList.toggle('selected', mode === 'direct');
         optTriche.classList.toggle('selected', mode === 'triche');
         optPedagogique.querySelector('input').checked = mode === 'pedagogique';
-        optDirect.querySelector('input').checked = mode === 'direct';
         optTriche.querySelector('input').checked = mode === 'triche';
 
         // Afficher/masquer les options du mode triche
@@ -92,7 +88,6 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function getSelectedMode() {
         if (optPedagogique.classList.contains('selected')) return 'pedagogique';
-        if (optDirect.classList.contains('selected')) return 'direct';
         if (optTriche.classList.contains('selected')) return 'triche';
         return 'pedagogique';
     }

@@ -80,42 +80,6 @@
             color: #6c757d;
         }
 
-        .mode-selector {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .mode-btn {
-            flex: 1;
-            padding: 10px;
-            border: 2px solid #e9ecef;
-            background: white;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-
-        .mode-btn.active {
-            border-color: #667eea;
-            background: #f0f4ff;
-        }
-
-        .mode-btn:hover {
-            border-color: #667eea;
-        }
-
-        .mode-btn strong {
-            display: block;
-            margin-bottom: 4px;
-            color: #212529;
-        }
-
-        .mode-btn span {
-            color: #6c757d;
-            font-size: 11px;
-        }
 
         .actions {
             display: flex;
@@ -211,24 +175,6 @@
             </div>
         </div>
 
-        <!-- Selecteur de mode -->
-        <div class="status-card">
-            <h3>Mode d'assistance</h3>
-            <div class="mode-selector">
-                <button class="mode-btn" id="mode-pedagogique" data-mode="pedagogique">
-                    <strong>Pedagogique</strong>
-                    <span>Guide sans donner la reponse</span>
-                </button>
-                <button class="mode-btn" id="mode-direct" data-mode="direct">
-                    <strong>Direct</strong>
-                    <span>Donne la solution complete</span>
-                </button>
-            </div>
-            <div class="info-box">
-                Le mode pedagogique t'aide a comprendre par toi-meme.<br>
-                Utilise le mode direct seulement si tu bloques vraiment !
-            </div>
-        </div>
 
         <!-- Actions -->
         <div class="actions">

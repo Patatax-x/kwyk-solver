@@ -5,8 +5,7 @@ Assistant pedagogique pour les exercices de maths sur Kwyk.fr
 ## Fonctionnalites
 
 - **Detection automatique** des exercices sur Kwyk (QCM, saisie libre, etc.)
-- **Mode pedagogique** : guide sans donner la reponse (ideal pour apprendre)
-- **Mode direct** : donne la solution complete (a utiliser avec moderation)
+- **Mode pedagogique** : donne la solution complete avec explications
 - **Interface integree** : panneau lateral discret sur la page Kwyk
 - **Conversation** : pose des questions supplementaires si besoin
 
@@ -51,20 +50,14 @@ Telecharge ou clone ce dossier sur ton ordinateur.
 5. Utilise les boutons :
    - **Explique-moi** : comprendre les concepts
    - **Indice** : obtenir un coup de pouce
-   - **Reponse** : voir la solution (mode pedagogique = explication detaillee)
+   - **Reponse** : voir la solution avec explication detaillee
 6. Pose des questions personnalisees dans le champ de texte
 
 ## Modes
 
-### Mode Pedagogique (recommande)
-- Le tuteur te guide sans donner la reponse
-- Il pose des questions pour te faire reflechir
-- Ideal pour vraiment progresser en maths
-
-### Mode Direct
-- Le tuteur donne la solution complete
-- Utile quand tu bloques completement
-- A utiliser avec moderation pour ne pas prendre de mauvaises habitudes
+### Mode Pedagogique
+- Le tuteur donne la solution complete avec explications
+- Tous les boutons sont visibles (Explique-moi, Indice, Reponse)
 
 ## Structure des fichiers
 
@@ -101,11 +94,13 @@ Kwyk/
 ## Philosophie
 
 Cette extension est concue pour t'aider a **apprendre**, pas pour tricher.
-Le mode pedagogique est la par defaut pour t'encourager a reflechir.
-Utilise le mode direct seulement quand tu as vraiment besoin d'aide.
+Le mode pedagogique est la par defaut pour t'accompagner dans tes exercices.
 
 Bonne chance dans tes exercices de maths !
 
+## Regles importantes
+Mets à jour ce fichier après chaque changement significatif
+Demande moi avant de coder.
 ---
 
 Cree par Morgan Bouchon - 2026

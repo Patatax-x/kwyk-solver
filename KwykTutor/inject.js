@@ -1,5 +1,5 @@
 /**
- * Kwyk Tutor V12 - Script injecté dans le contexte de la page
+ * Kwyk Tutor V14 - Script injecté dans le contexte de la page
  * Permet d'accéder à MathQuill (MQ) qui n'est pas accessible depuis le content script
  *
  * V12: Utilise write() au lieu de latex() pour préserver le format LaTeX exact
