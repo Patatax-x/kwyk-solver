@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kwyk Tutor — Mise à jour</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0f0f1a;
+            color: #eaeaea;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .card {
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 32px;
+            border: 1px solid #2a2a4a;
+            text-align: center;
+        }
+
+        .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            font-size: 22px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #777;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+
+        .version-info {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .version-info .label {
+            color: #777;
+            font-size: 12px;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .version-info .current {
+            color: #e74c3c;
+        }
+
+        .version-info .new {
+            color: #27ae60;
+        }
+
+        .arrow {
+            color: #667eea;
+            font-size: 20px;
+            align-self: center;
+        }
+
+        .btn {
+            padding: 12px 28px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .steps {
+            text-align: left;
+            margin: 20px 0;
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 0;
+            font-size: 14px;
+            color: #999;
+        }
+
+        .step-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #2a2a4a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+
+        .step.active {
+            color: #eaeaea;
+        }
+
+        .step.active .step-icon {
+            background: #667eea;
+        }
+
+        .step.done .step-icon {
+            background: #27ae60;
+        }
+
+        .step.error .step-icon {
+            background: #e74c3c;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #2a2a4a;
+            border-radius: 2px;
+            margin: 16px 0;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-bar.show {
+            display: block;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 2px;
+            transition: width 0.3s;
+            width: 0%;
+        }
+
+        .file-list {
+            text-align: left;
+            margin: 12px 0;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            font-size: 13px;
+            font-family: monospace;
+            color: #999;
+            border-bottom: 1px solid #1f1f3a;
+        }
+
+        .file-item.done {
+            color: #27ae60;
+        }
+
+        .file-item.error {
+            color: #e74c3c;
+        }
+
+        .file-status {
+            font-size: 14px;
+        }
+
+        .result-message {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .result-message.success {
+            display: block;
+            background: rgba(39, 174, 96, 0.15);
+            color: #27ae60;
+        }
+
+        .result-message.error {
+            display: block;
+            background: rgba(231, 76, 60, 0.15);
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="icon" id="main-icon">🔄</div>
+            <h1>Mise à jour disponible</h1>
+            <p class="subtitle">Une nouvelle version de Kwyk Tutor est disponible</p>
+
+            <div class="version-info">
+                <div>
+                    <span class="label">Version actuelle</span>
+                    <span class="current" id="current-version">...</span>
+                </div>
+                <div class="arrow">→</div>
+                <div>
+                    <span class="label">Nouvelle version</span>
+                    <span class="new" id="new-version">...</span>
+                </div>
+            </div>
+
+            <div class="steps" id="steps">
+                <div class="step" id="step-1">
+                    <div class="step-icon">1</div>
+                    <div>Sélectionnez le dossier de l'extension</div>
+                </div>
+                <div class="step" id="step-2">
+                    <div class="step-icon">2</div>
+                    <div>Téléchargement des fichiers</div>
+                </div>
+                <div class="step" id="step-3">
+                    <div class="step-icon">3</div>
+                    <div>Rechargez l'extension dans chrome://extensions</div>
+                </div>
+            </div>
+
+            <div class="progress-bar" id="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+
+            <div class="file-list" id="file-list" style="display: none;"></div>
+
+            <button class="btn btn-primary" id="btn-update" onclick="startUpdate()">
+                Mettre à jour
+            </button>
+
+            <div class="result-message" id="result-message"></div>
+        </div>
+    </div>
+
+    <script>
+        const GIST_RAW_URL = 'https://gist.githubusercontent.com/Patatax-x/41704ea544bc0e2531d20a0d9c9d592e/raw/kwyk-config.json';
+        const LOCAL_VERSION = '13.0.0';
+
+        let remoteConfig = null;
+        let dirHandle = null;
+
+        // Init: charger la config distante
+        document.addEventListener('DOMContentLoaded', async () => {
+            document.getElementById('current-version').textContent = 'v' + LOCAL_VERSION;
+
+            try {
+                const response = await fetch(GIST_RAW_URL + '?t=' + Date.now(), { cache: 'no-store' });
+                remoteConfig = await response.json();
+                document.getElementById('new-version').textContent = 'v' + (remoteConfig.version || '?');
+
+                if (!remoteConfig.update_repo || !remoteConfig.update_files || remoteConfig.update_files.length === 0) {
+                    showResult('error', 'Configuration de mise à jour non définie. Contactez l\'administrateur.');
+                    document.getElementById('btn-update').disabled = true;
+                }
+            } catch (e) {
+                showResult('error', 'Impossible de charger la configuration : ' + e.message);
+                document.getElementById('btn-update').disabled = true;
+            }
+        });
+
+        async function startUpdate() {
+            const btn = document.getElementById('btn-update');
+            btn.disabled = true;
+
+            // Étape 1 : Sélectionner le dossier
+            setStep(1, 'active');
+            try {
+                dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+
+                // Vérifier que c'est bien le bon dossier (manifest.json existe)
+                try {
+                    await dirHandle.getFileHandle('manifest.json');
+                } catch {
+                    showResult('error', 'Ce dossier ne contient pas manifest.json. Sélectionnez le dossier de l\'extension.');
+                    setStep(1, 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                setStep(1, 'done');
+            } catch (e) {
+                if (e.name === 'AbortError') {
+                    btn.disabled = false;
+                    return;
+                }
+                showResult('error', 'Erreur sélection dossier : ' + e.message);
+                setStep(1, 'error');
+                btn.disabled = false;
+                return;
+            }
+
+            // Étape 2 : Télécharger et écrire les fichiers
+            setStep(2, 'active');
+            const progressBar = document.getElementById('progress-bar');
+            const progressFill = document.getElementById('progress-fill');
+            const fileList = document.getElementById('file-list');
+            progressBar.classList.add('show');
+            fileList.style.display = 'block';
+
+            const files = remoteConfig.update_files;
+            const repo = remoteConfig.update_repo;
+            const branch = remoteConfig.update_branch || 'main';
+            let successCount = 0;
+
+            // Afficher la liste des fichiers
+            fileList.innerHTML = files.map(f => `
+                <div class="file-item" id="file-${f.replace(/[^a-zA-Z0-9]/g, '_')}">
+                    <span class="file-status">⏳</span>
+                    <span>${f}</span>
+                </div>
+            `).join('');
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const fileId = 'file-' + file.replace(/[^a-zA-Z0-9]/g, '_');
+                const fileEl = document.getElementById(fileId);
+
+                try {
+                    // Télécharger depuis GitHub raw
+                    const url = `https://raw.githubusercontent.com/${repo}/${branch}/${file}?t=${Date.now()}`;
+                    const response = await fetch(url);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    // Gérer les sous-dossiers (ex: icons/icon16.png)
+                    const parts = file.split('/');
+                    let currentDir = dirHandle;
+
+                    for (let j = 0; j < parts.length - 1; j++) {
+                        currentDir = await currentDir.getDirectoryHandle(parts[j], { create: true });
+                    }
+
+                    const fileName = parts[parts.length - 1];
+
+                    // Déterminer si c'est un fichier binaire (images)
+                    const isBinary = /\.(png|jpg|jpeg|gif|ico|woff|woff2|ttf)$/i.test(fileName);
+
+                    const fileHandle = await currentDir.getFileHandle(fileName, { create: true });
+                    const writable = await fileHandle.createWritable();
+
+                    if (isBinary) {
+                        const blob = await response.blob();
+                        await writable.write(blob);
+                    } else {
+                        const text = await response.text();
+                        await writable.write(text);
+                    }
+
+                    await writable.close();
+
+                    successCount++;
+                    if (fileEl) {
+                        fileEl.classList.add('done');
+                        fileEl.querySelector('.file-status').textContent = '✓';
+                    }
+                } catch (e) {
+                    console.error(`Erreur fichier ${file}:`, e);
+                    if (fileEl) {
+                        fileEl.classList.add('error');
+                        fileEl.querySelector('.file-status').textContent = '✗';
+                    }
+                }
+
+                progressFill.style.width = ((i + 1) / files.length * 100) + '%';
+            }
+
+            if (successCount === files.length) {
+                setStep(2, 'done');
+                setStep(3, 'active');
+                document.getElementById('main-icon').textContent = '✅';
+                showResult('success', `${successCount} fichier(s) mis à jour ! Rechargez l'extension dans chrome://extensions (bouton 🔄)`);
+            } else {
+                setStep(2, 'error');
+                showResult('error', `${successCount}/${files.length} fichiers mis à jour. Certains fichiers ont échoué.`);
+                btn.disabled = false;
+            }
+        }
+
+        function setStep(num, state) {
+            const step = document.getElementById('step-' + num);
+            step.className = 'step ' + state;
+            if (state === 'done') {
+                step.querySelector('.step-icon').textContent = '✓';
+            } else if (state === 'error') {
+                step.querySelector('.step-icon').textContent = '✗';
+            }
+        }
+
+        function showResult(type, message) {
+            const el = document.getElementById('result-message');
+            el.textContent = message;
+            el.className = 'result-message ' + type;
+        }
+    </script>
+</body>
+</html>
