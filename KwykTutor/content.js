@@ -1,9 +1,24 @@
 /**
- * Kwyk Tutor - Version 14 (V14)
+ * Kwyk Tutor - Version 16 (V16)
  * =============================
- * Support des tableaux de valeurs
+ * Multi-questions, contexte partagé, tableau de variations amélioré
  *
- * Nouveautés V14:
+ * Nouveautés V16:
+ * - FEATURE: Classification par question — chaque question a son propre type et appel API séparé
+ * - FEATURE: Contexte partagé — Q2+ reçoit le contexte de Q1 (graphique, fonction) dans son prompt
+ * - FEATURE: Affichage par question — chaque onglet affiche la réponse de sa propre question
+ * - FEATURE: Tableau de variations simple — values contient uniquement ↗/↘/|| (jamais de valeurs numériques)
+ * - FEATURE: renderSimpleVariationTable() — colonnes bornes + intervalles correctement intercalées
+ * - FIX: Heartbeat 60s + protection rate limit (429/403 → suspension 5min)
+ *
+ * Historique V15:
+ * - FEATURE: Classification automatique du type d'exercice (DOM + texte)
+ *   Types: qcm_simple, qcm_multiple, input, tableau_signes, tableau_variations, tableau_valeurs, graphique
+ * - FEATURE: Prompts modulaires — base + module type spécifique avec few-shot example
+ * - FEATURE: L'IA reçoit uniquement les instructions pertinentes au type détecté
+ * - AMÉLIORATION: Meilleure précision des réponses IA grâce à des prompts ciblés
+ *
+ * Historique V14:
  * - FEATURE: Support des tableaux de valeurs (prettytable) - formatage pour l'IA
  * - FEATURE: Tableaux de valeurs retirés de la liste des exercices non supportés
  * - FEATURE: Prompt IA amélioré pour les calculs sur tableaux
@@ -74,7 +89,7 @@
 (function() {
     'use strict';
 
-    console.log('[Kwyk Tutor] === Démarrage V14 - Support tableaux ===');
+    console.log('[Kwyk Tutor] === Démarrage V16 - Multi-questions & Tableaux améliorés ===');
 
     // Config
     let config = {
@@ -134,8 +149,16 @@
     const GIST_RAW_URL = 'https://gist.githubusercontent.com/Patatax-x/41704ea544bc0e2531d20a0d9c9d592e/raw/kwyk-config.json';
     const LOCAL_VERSION = '13.0.0';
 
+    // Gist utilisateurs (lecture + écriture)
+    const USERS_GIST_ID = 'b2ab6441fd1de494a4c3b33af765dcac';
+    const GIST_TOKEN = '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';
+
     let extensionBlocked = false;   // true si une plage de blocage est active
     let blockedMessage = '';        // Message à afficher quand bloqué
+    let userBlocked = false;        // true si l'utilisateur est désactivé par l'admin
+    let userPseudo = '';            // Pseudo de l'utilisateur
+    let userId = '';                // UUID de l'utilisateur
+    let userPseudoLocked = false;   // true si le pseudo est verrouillé par l'admin
 
     /**
      * Vérifie la config distante (Gist) pour bloquer l'extension pendant les contrôles
@@ -194,6 +217,336 @@
             console.error('[Kwyk Tutor] Erreur vérification config:', error);
             extensionBlocked = true;
             blockedMessage = 'Impossible de vérifier la configuration. Vérifiez votre connexion.';
+        }
+    }
+
+    // ===========================================
+    // GESTION UTILISATEURS
+    // ===========================================
+
+    /**
+     * Charge l'UUID utilisateur depuis chrome.storage.local (ou en génère un)
+     */
+    async function loadUserId() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get(['kwykUserId', 'kwykUserPseudo'], (result) => {
+                if (result.kwykUserId) {
+                    userId = result.kwykUserId;
+                } else {
+                    userId = crypto.randomUUID();
+                    chrome.storage.local.set({ kwykUserId: userId });
+                }
+                if (result.kwykUserPseudo) {
+                    userPseudo = result.kwykUserPseudo;
+                }
+                console.log('[Kwyk Tutor] User ID:', userId, '| Pseudo:', userPseudo || '(non défini)');
+                resolve();
+            });
+        });
+    }
+
+    /**
+     * Vérifie l'accès de l'utilisateur dans le Gist users
+     * - Si l'utilisateur n'existe pas → autorisé par défaut
+     * - Si enabled === false → bloqué
+     * - Met à jour le pseudo si renommé par l'admin
+     */
+    async function checkUserAccess() {
+        try {
+            const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
+                headers: { 'Authorization': `token ${GIST_TOKEN}` }
+            });
+
+            if (!response.ok) {
+                console.error('[Kwyk Tutor] Erreur fetch users gist:', response.status);
+                return;
+            }
+
+            const gist = await response.json();
+            const file = gist.files['kwyk-users.json'];
+            if (!file) return;
+
+            let usersData;
+            try {
+                usersData = JSON.parse(file.content);
+            } catch (e) {
+                console.error('[Kwyk Tutor] JSON corrompu dans Gist users:', e);
+                return;
+            }
+            const userData = usersData[userId];
+
+            if (userData) {
+                // Utilisateur connu
+                if (userData.enabled === false) {
+                    userBlocked = true;
+                    console.log('[Kwyk Tutor] ⛔ Utilisateur désactivé par admin');
+                    return;
+                }
+                // Si l'admin a renommé le pseudo, on met à jour localement
+                if (userData.name && userData.name !== userPseudo) {
+                    userPseudo = userData.name;
+                    chrome.storage.local.set({ kwykUserPseudo: userPseudo });
+                }
+                // Vérifier si pseudo verrouillé
+                if (userData.locked) {
+                    userPseudoLocked = true;
+                }
+            }
+        } catch (error) {
+            console.error('[Kwyk Tutor] Erreur vérification accès utilisateur:', error);
+        }
+    }
+
+    /**
+     * Enregistre ou met à jour l'utilisateur dans le Gist users
+     */
+    async function registerUser(pseudo) {
+        try {
+            // Lire le Gist actuel
+            const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
+                headers: { 'Authorization': `token ${GIST_TOKEN}` }
+            });
+
+            if (!response.ok) {
+                console.error('[Kwyk Tutor] Erreur lecture gist users:', response.status);
+                return false;
+            }
+
+            const gist = await response.json();
+            const file = gist.files['kwyk-users.json'];
+            let usersData = {};
+            if (file) {
+                try {
+                    usersData = JSON.parse(file.content);
+                } catch (e) {
+                    console.error('[Kwyk Tutor] JSON corrompu dans Gist users:', e);
+                }
+            }
+
+            // Ajouter/mettre à jour l'utilisateur
+            const existing = usersData[userId] || {};
+            usersData[userId] = {
+                name: pseudo,
+                enabled: existing.enabled !== undefined ? existing.enabled : true,
+                locked: existing.locked || false,
+                lastSeen: new Date().toISOString(),
+                lastPing: new Date().toISOString()
+            };
+
+            // Écrire dans le Gist
+            const writeResponse = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `token ${GIST_TOKEN}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    files: {
+                        'kwyk-users.json': {
+                            content: JSON.stringify(usersData, null, 2)
+                        }
+                    }
+                })
+            });
+
+            if (writeResponse.ok) {
+                userPseudo = pseudo;
+                chrome.storage.local.set({ kwykUserPseudo: pseudo });
+                console.log('[Kwyk Tutor] Utilisateur enregistré:', pseudo);
+                return true;
+            } else {
+                console.error('[Kwyk Tutor] Erreur écriture gist users:', writeResponse.status);
+                return false;
+            }
+        } catch (error) {
+            console.error('[Kwyk Tutor] Erreur enregistrement utilisateur:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Envoie un heartbeat (met à jour lastPing dans le Gist)
+     * Utilise un verrou pour éviter les race conditions
+     */
+    let heartbeatInProgress = false;
+    let heartbeatRateLimited = false;
+
+    async function sendHeartbeat() {
+        if (heartbeatInProgress || heartbeatRateLimited) return;
+        heartbeatInProgress = true;
+
+        try {
+            const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
+                headers: { 'Authorization': `token ${GIST_TOKEN}` }
+            });
+
+            if (response.status === 429 || response.status === 403) {
+                console.warn(`[Kwyk Tutor] Rate limit GitHub (${response.status}), heartbeat suspendu 5 min`);
+                heartbeatRateLimited = true;
+                setTimeout(() => { heartbeatRateLimited = false; }, 300000);
+                return;
+            }
+            if (!response.ok) {
+                console.error(`[Kwyk Tutor] Erreur heartbeat GET: ${response.status}`);
+                return;
+            }
+
+            const gist = await response.json();
+            const file = gist.files['kwyk-users.json'];
+            if (!file) return;
+
+            let usersData;
+            try {
+                usersData = JSON.parse(file.content);
+            } catch (e) {
+                console.error('[Kwyk Tutor] JSON corrompu dans Gist users:', e);
+                return;
+            }
+            if (!usersData[userId]) return;
+
+            usersData[userId].lastPing = new Date().toISOString();
+
+            const writeResponse = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `token ${GIST_TOKEN}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    files: {
+                        'kwyk-users.json': {
+                            content: JSON.stringify(usersData, null, 2)
+                        }
+                    }
+                })
+            });
+
+            if (writeResponse.status === 429 || writeResponse.status === 403) {
+                console.warn(`[Kwyk Tutor] Rate limit GitHub PATCH (${writeResponse.status}), heartbeat suspendu 5 min`);
+                heartbeatRateLimited = true;
+                setTimeout(() => { heartbeatRateLimited = false; }, 300000);
+            } else if (!writeResponse.ok) {
+                console.error(`[Kwyk Tutor] Erreur heartbeat PATCH: ${writeResponse.status}`);
+            }
+        } catch (error) {
+            console.error('[Kwyk Tutor] Erreur heartbeat:', error);
+        } finally {
+            heartbeatInProgress = false;
+        }
+    }
+
+    /**
+     * Démarre le heartbeat toutes les 60 secondes
+     */
+    let heartbeatInterval = null;
+
+    function startHeartbeat() {
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+        sendHeartbeat();
+        heartbeatInterval = setInterval(sendHeartbeat, 60000);
+    }
+
+    /**
+     * Affiche le formulaire de saisie du pseudo dans le panel
+     */
+    function showPseudoPrompt() {
+        const panel = document.getElementById('kwyk-tutor-panel');
+        if (!panel) return;
+
+        // Masquer tout le contenu sauf le header
+        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-unsupported', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
+        elementsToHide.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+
+        const pseudoForm = document.createElement('div');
+        pseudoForm.id = 'kwyk-pseudo-form';
+        pseudoForm.innerHTML = `
+            <div style="padding: 20px; text-align: center;">
+                <div style="font-size: 32px; margin-bottom: 12px;">👋</div>
+                <h3 style="margin-bottom: 8px; color: var(--kwyk-text, #212529);">Bienvenue sur Kwyk Tutor !</h3>
+                <p style="font-size: 13px; color: var(--kwyk-text-secondary, #6c757d); margin-bottom: 16px;">Choisis un pseudo pour commencer</p>
+                <input type="text" id="kwyk-pseudo-input" placeholder="Ton pseudo..." style="
+                    width: 100%; padding: 10px 14px; border: 2px solid #e9ecef; border-radius: 8px;
+                    font-size: 14px; margin-bottom: 12px; outline: none; background: var(--kwyk-input-bg, white);
+                    color: var(--kwyk-text, #212529);
+                ">
+                <button id="kwyk-pseudo-submit" style="
+                    width: 100%; padding: 10px; border: none; border-radius: 8px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white; font-size: 14px; font-weight: 600; cursor: pointer;
+                ">Valider</button>
+            </div>
+        `;
+
+        const header = panel.querySelector('.kwyk-tutor-header');
+        if (header) {
+            header.after(pseudoForm);
+        }
+
+        const input = document.getElementById('kwyk-pseudo-input');
+        const submitBtn = document.getElementById('kwyk-pseudo-submit');
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') submitBtn.click();
+        });
+
+        submitBtn.addEventListener('click', async () => {
+            const pseudo = input.value.trim();
+            if (!pseudo) {
+                input.style.borderColor = '#dc3545';
+                return;
+            }
+
+            submitBtn.textContent = 'Enregistrement...';
+            submitBtn.disabled = true;
+
+            const success = await registerUser(pseudo);
+            if (success) {
+                pseudoForm.remove();
+                // Réafficher seulement les éléments normaux (pas kwyk-unsupported)
+                ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = '';
+                });
+                // Continuer l'init
+                continueInit();
+            } else {
+                submitBtn.textContent = 'Erreur, réessayer';
+                submitBtn.disabled = false;
+            }
+        });
+    }
+
+    /**
+     * Continue l'initialisation après enregistrement du pseudo
+     */
+    function continueInit() {
+        startHeartbeat();
+        updateButtonsForMode();
+
+        setTimeout(() => {
+            detectExercise();
+        }, 1500);
+
+        setupExerciseObserver();
+
+        if (chrome?.storage?.onChanged) {
+            chrome.storage.onChanged.addListener((changes, area) => {
+                if (area === 'sync') {
+                    if (changes.mode) {
+                        config.mode = changes.mode.newValue;
+                        updateButtonsForMode();
+                    }
+                    if (changes.cheatAutoValidate !== undefined) {
+                        config.cheatAutoValidate = changes.cheatAutoValidate.newValue;
+                    }
+                    if (changes.cheatAutoNext !== undefined) {
+                        config.cheatAutoNext = changes.cheatAutoNext.newValue;
+                    }
+                }
+            });
         }
     }
 
@@ -321,11 +674,49 @@
     async function init() {
         console.log('[Kwyk Tutor] Initialisation...');
 
-        // ÉTAPE 0: Vérifier le blocage distant
+        // ÉTAPE 0: Charger l'identité utilisateur
+        await loadUserId();
+
+        // ÉTAPE 0b: Vérifier le blocage distant + accès utilisateur
         await checkRemoteConfig();
+        await checkUserAccess();
 
         await loadConfig();
         createUI();
+
+        // Si utilisateur désactivé par l'admin
+        if (userBlocked) {
+            console.log('[Kwyk Tutor] ⛔ Utilisateur bloqué');
+            const btn = document.getElementById('kwyk-tutor-btn');
+            if (btn) {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    let popup = document.getElementById('kwyk-blocked-popup');
+                    if (popup) { popup.remove(); return; }
+                    popup = document.createElement('div');
+                    popup.id = 'kwyk-blocked-popup';
+                    popup.innerHTML = `
+                        <div class="kwyk-blocked-popup-icon">🚫</div>
+                        <div class="kwyk-blocked-popup-text">Accès désactivé. Contactez l'administrateur.</div>
+                    `;
+                    document.body.appendChild(popup);
+                    setTimeout(() => popup?.remove(), 4000);
+                }, true);
+            }
+            return;
+        }
+
+        // Si pseudo non défini : afficher le formulaire de pseudo
+        if (!userPseudo) {
+            console.log('[Kwyk Tutor] Pseudo non défini, affichage du formulaire');
+            showPseudoPrompt();
+            return;
+        }
+
+        // Mettre à jour lastSeen dans le Gist (sans bloquer)
+        registerUser(userPseudo);
+        startHeartbeat();
 
         // Si bloqué : masquer le panneau et afficher le message au clic
         if (extensionBlocked) {
@@ -457,8 +848,12 @@
     // OBSERVER
     // ===========================================
 
+    let exerciseObserver = null;
+
     function setupExerciseObserver() {
-        const observer = new MutationObserver((mutations) => {
+        if (exerciseObserver) exerciseObserver.disconnect();
+
+        exerciseObserver = new MutationObserver((mutations) => {
             let shouldCheck = false;
 
             for (const mutation of mutations) {
@@ -490,7 +885,7 @@
             }
         });
 
-        observer.observe(document.body, { childList: true, subtree: true });
+        exerciseObserver.observe(document.body, { childList: true, subtree: true });
     }
 
     function checkExerciseChanged() {
@@ -607,6 +1002,37 @@
     }
 
 
+    /**
+     * V15: Extrait le texte d'un label en convertissant les formules MathJax en notation lisible.
+     * Utilisé pour les labels de QCM (radios) et QCM multiples (checkboxes).
+     */
+    function extractLabelWithMath(element) {
+        if (!element) return '';
+        const clone = element.cloneNode(true);
+
+        // Convertir chaque conteneur MathJax en texte mathématique lisible
+        clone.querySelectorAll('mjx-container').forEach(container => {
+            const assistiveMml = container.querySelector('mjx-assistive-mml');
+            if (assistiveMml) {
+                const mathEl = assistiveMml.querySelector('math');
+                if (mathEl) {
+                    const text = mathMLToText(mathEl);
+                    if (text) {
+                        container.replaceWith(document.createTextNode(text));
+                        return;
+                    }
+                }
+            }
+            // Fallback: textContent brut
+            const fallback = container.textContent.trim();
+            if (fallback) {
+                container.replaceWith(document.createTextNode(fallback));
+            }
+        });
+
+        return clone.textContent.trim();
+    }
+
     // ===========================================
     // UI - POSITION FIXE
     // ===========================================
@@ -631,20 +1057,20 @@
                 <button class="kwyk-tutor-close" id="kwyk-close">&times;</button>
             </div>
             <div class="kwyk-exercise-preview" id="kwyk-preview">
-                <small>Exercice detecte:</small>
+                <small>Exercice détecté :</small>
                 <div id="kwyk-preview-text">Chargement...</div>
             </div>
             <div class="kwyk-question-nav" id="kwyk-question-nav" style="display:none;"></div>
             <div class="kwyk-status" id="kwyk-status"></div>
             <div class="kwyk-unsupported-warning" id="kwyk-unsupported" style="display:none;">
                 <strong>Exercice non supporté</strong>
-                <p>Ce type d'exercice (tableau/graphique) ne peut pas être résolu automatiquement.</p>
+                <p>Ce type d'exercice ne peut pas être résolu automatiquement.</p>
                 <p class="kwyk-unsupported-joke">T'avais qu'à écouter en cours ! ;)</p>
             </div>
             <div class="kwyk-action-buttons" id="kwyk-actions">
                 <button class="kwyk-action-btn primary" id="btn-explain">Explique</button>
                 <button class="kwyk-action-btn secondary" id="btn-hint">Indice</button>
-                <button class="kwyk-action-btn warning" id="btn-answer">Reponse</button>
+                <button class="kwyk-action-btn warning" id="btn-answer">Réponse</button>
             </div>
             <div class="kwyk-cheat-mode" id="kwyk-cheat-section" style="display:none;">
                 <div class="kwyk-cheat-toggle">
@@ -838,6 +1264,27 @@
                 cheatModeActive = false;
             }
             cheatModeRunning = false; // Libérer le verrou
+            return;
+        }
+
+        // V15: Bloquer le mode triche pour les tableaux (signes, variations, valeurs)
+        const exerciseType = currentExercise?.exerciseType;
+        if (exerciseType === 'tableau_signes' || exerciseType === 'tableau_variations' || exerciseType === 'tableau_valeurs') {
+            console.log(`[Kwyk Tutor] Mode triche bloqué pour type: ${exerciseType}`);
+            updateCheatStatus('Tableaux non supportés en mode triche. Utilise le mode pédagogique !', 'error');
+
+            // Auto-skip si les options sont activées
+            if (config.cheatAutoValidate && config.cheatAutoNext) {
+                setTimeout(() => {
+                    const nextBtn = document.querySelector('button.exercise_next');
+                    if (nextBtn) {
+                        nextBtn.click();
+                        console.log('[Kwyk Tutor] Auto-skip tableau');
+                    }
+                }, 200);
+            }
+
+            cheatModeRunning = false;
             return;
         }
 
@@ -1569,10 +2016,10 @@
             }
         }
 
-        // 2. Correspondance EXACTE du label
+        // 2. Correspondance EXACTE du label (V15: support MathJax)
         for (const radio of radioArray) {
-            const label = radio.labels?.[0]?.textContent.trim().toLowerCase() ||
-                         radio.parentElement.textContent.trim().toLowerCase();
+            const labelEl = radio.labels?.[0] || radio.parentElement;
+            const label = extractLabelWithMath(labelEl).toLowerCase();
 
             if (label === answer) {
                 radio.checked = true;
@@ -1586,8 +2033,8 @@
 
         // 3. Le label CONTIENT la réponse exacte (avec espaces/ponctuation autour)
         for (const radio of radioArray) {
-            const label = radio.labels?.[0]?.textContent.trim().toLowerCase() ||
-                         radio.parentElement.textContent.trim().toLowerCase();
+            const labelEl = radio.labels?.[0] || radio.parentElement;
+            const label = extractLabelWithMath(labelEl).toLowerCase();
 
             // Vérifier si le label contient la réponse comme mot entier
             const regex = new RegExp(`(^|\\s|\\.|,)${escapeRegex(answer)}($|\\s|\\.|,)`, 'i');
@@ -1603,8 +2050,8 @@
 
         // 4. Fallback: premier mot du label correspond
         for (const radio of radioArray) {
-            const label = radio.labels?.[0]?.textContent.trim().toLowerCase() ||
-                         radio.parentElement.textContent.trim().toLowerCase();
+            const labelEl = radio.labels?.[0] || radio.parentElement;
+            const label = extractLabelWithMath(labelEl).toLowerCase();
             const firstWord = label.split(/[\s.,]+/)[0];
 
             if (firstWord === answer || answer === firstWord) {
@@ -1663,7 +2110,7 @@
         // Si aucun match exact, alors splitter sur les virgules
         const fullAnswer = reponse.reponse.trim().toLowerCase();
         const checkboxLabels = Array.from(checkboxes).map(cb =>
-            (cb.labels?.[0]?.textContent.trim().toLowerCase() || cb.parentElement.textContent.trim().toLowerCase())
+            extractLabelWithMath(cb.labels?.[0] || cb.parentElement).toLowerCase()
         );
         const hasExactFullMatch = checkboxLabels.some(label => label === fullAnswer);
         const answers = hasExactFullMatch
@@ -1694,11 +2141,10 @@
                 }
             }
 
-            // 2. Essayer par correspondance EXACTE du label
+            // 2. Essayer par correspondance EXACTE du label (V15: support MathJax)
             if (!matched) {
                 for (const checkbox of checkboxArray) {
-                    const label = checkbox.labels?.[0]?.textContent.trim().toLowerCase() ||
-                                 checkbox.parentElement.textContent.trim().toLowerCase();
+                    const label = extractLabelWithMath(checkbox.labels?.[0] || checkbox.parentElement).toLowerCase();
 
                     // Correspondance exacte
                     if (label === answer) {
@@ -1717,8 +2163,7 @@
             // 3. Essayer par correspondance partielle (le label COMMENCE par la réponse)
             if (!matched) {
                 for (const checkbox of checkboxArray) {
-                    const label = checkbox.labels?.[0]?.textContent.trim().toLowerCase() ||
-                                 checkbox.parentElement.textContent.trim().toLowerCase();
+                    const label = extractLabelWithMath(checkbox.labels?.[0] || checkbox.parentElement).toLowerCase();
 
                     if (label.startsWith(answer + ' ') || label.startsWith(answer + '.')) {
                         checkbox.checked = true;
@@ -1850,6 +2295,101 @@
     }
 
     // ===========================================
+    // V15: CLASSIFICATION DU TYPE D'EXERCICE
+    // ===========================================
+
+    /**
+     * Classifie l'exercice en analysant le DOM et le texte des questions.
+     * Retourne un type parmi : qcm_simple, qcm_multiple, input, tableau_signes,
+     * tableau_variations, tableau_valeurs, graphique, unknown
+     */
+    /**
+     * Classifie le type de chaque question individuellement
+     */
+    function classifyQuestion(question) {
+        const text = (question.context || '').toLowerCase();
+
+        // Mots-clés textuels (priorité haute)
+        if (text.includes('[graphique')) return 'graphique';
+
+        const signesKeywords = ['tableau de signes', 'tableau de signe', 'compléter le tableau de signes', 'signe de'];
+        for (const kw of signesKeywords) {
+            if (text.includes(kw)) return 'tableau_signes';
+        }
+
+        const variationsKeywords = ['tableau de variations', 'tableau de variation', 'compléter le tableau de variations', 'variations de'];
+        for (const kw of variationsKeywords) {
+            if (text.includes(kw)) return 'tableau_variations';
+        }
+
+        if (text.includes('[tableau]')) return 'tableau_valeurs';
+
+        // Type DOM
+        if (question.type === 'checkbox') return 'qcm_multiple';
+        if (question.type === 'qcm') return 'qcm_simple';
+        if (question.type === 'input') return 'input';
+
+        return 'unknown';
+    }
+
+    function classifyExercise(questions, exerciseBlocks) {
+        // Classifier chaque question individuellement
+        const types = new Set();
+        questions.forEach((q, i) => {
+            q.questionType = classifyQuestion(q);
+            types.add(q.questionType);
+            console.log(`[Kwyk Tutor] Q${i + 1} type: ${q.questionType}`);
+        });
+
+        // Fallback global si toutes les questions sont unknown
+        if (types.size === 1 && types.has('unknown')) {
+            // Chercher globalement sur la page
+            const globalCheckboxes = document.querySelectorAll('input[type="checkbox"][id^="id_answer_"]');
+            if (globalCheckboxes.length > 0) {
+                if (questions.length > 0 && questions[0].type === 'unknown') {
+                    questions[0].type = 'checkbox';
+                    questions[0].questionType = 'qcm_multiple';
+                    globalCheckboxes.forEach(cb => {
+                        const label = extractLabelWithMath(cb.labels?.[0] || cb.parentElement);
+                        questions[0].options.push({ value: cb.value, label: label, id: cb.id });
+                    });
+                }
+                return 'qcm_multiple';
+            }
+            const globalRadios = document.querySelectorAll('input[type="radio"][id^="id_answer_"], input[type="radio"][id^="id_mcq_answer_"]');
+            if (globalRadios.length > 0) {
+                if (questions.length > 0 && questions[0].type === 'unknown') {
+                    questions[0].type = 'qcm';
+                    questions[0].questionType = 'qcm_simple';
+                    globalRadios.forEach(radio => {
+                        const label = extractLabelWithMath(radio.labels?.[0] || radio.parentElement);
+                        questions[0].options.push({ value: radio.value, label: label, id: radio.id });
+                    });
+                }
+                return 'qcm_simple';
+            }
+            const globalInputs = document.querySelectorAll('input[type="text"][id^="id_answer_"], .mq-editable-field.input-kwyk');
+            if (globalInputs.length > 0) {
+                if (questions.length > 0) {
+                    questions[0].type = 'input';
+                    questions[0].questionType = 'input';
+                }
+                return 'input';
+            }
+            console.log('[Kwyk Tutor] Type non identifié — fallback unknown');
+            return 'unknown';
+        }
+
+        // Retourner le type de la première question non-unknown
+        const nonUnknownTypes = [...types].filter(t => t !== 'unknown');
+        if (nonUnknownTypes.length === 0) return 'unknown';
+
+        // Chaque question a déjà son questionType individuel
+        // Le type global = type de la première question (pour l'affichage initial)
+        return questions[0].questionType || nonUnknownTypes[0];
+    }
+
+    // ===========================================
     // DETECTION EXERCICE - V13 MULTI-QUESTIONS
     // ===========================================
 
@@ -1899,8 +2439,13 @@
         // Hash pour detecter les changements
         lastExerciseHash = hashCode(exercise.texte);
 
+        // V15: Classifier le type d'exercice
+        exercise.exerciseType = classifyExercise(exercise.questions, exerciseBlocks);
+        console.log(`[Kwyk Tutor] Classification V15: ${exercise.exerciseType}`);
+
         currentExercise = exercise;
-        updatePreview(`${exercise.questions.length} question(s) detectée(s)`);
+        const currentQ = exercise.questions[currentQuestionIndex] || exercise.questions[0];
+        updatePreview(`${exercise.questions.length} question(s) détectée(s) [${currentQ?.questionType || exercise.exerciseType}]`);
 
         // Vérifier si l'exercice est supporté
         checkUnsupportedExercise();
@@ -2069,11 +2614,10 @@
         if (radios.length > 0) {
             question.type = 'qcm';
 
-            // Extraire les options avec leurs labels
+            // Extraire les options avec leurs labels (V15: support MathJax)
             radios.forEach(radio => {
-                const label = radio.labels?.[0]?.textContent.trim() ||
-                             radio.nextSibling?.textContent?.trim() ||
-                             radio.parentElement.textContent.trim();
+                const labelEl = radio.labels?.[0] || radio.parentElement;
+                const label = extractLabelWithMath(labelEl);
 
                 question.options.push({
                     value: radio.value,
@@ -2086,11 +2630,11 @@
         }
         else if (checkboxes.length > 0) {
             question.type = 'checkbox';
-            
+
             checkboxes.forEach(checkbox => {
-                const label = checkbox.labels?.[0]?.textContent.trim() || 
-                             checkbox.parentElement.textContent.trim();
-                
+                const labelEl = checkbox.labels?.[0] || checkbox.parentElement;
+                const label = extractLabelWithMath(labelEl);
+
                 question.options.push({
                     value: checkbox.value,
                     label: label,
@@ -2140,7 +2684,13 @@
             btn.addEventListener('click', () => {
                 currentQuestionIndex = i;
                 updateQuestionNavigation();
-                
+
+                // Mettre à jour le preview avec le type de la question sélectionnée
+                const q = currentExercise.questions[i];
+                if (q) {
+                    updatePreview(`${currentExercise.questions.length} question(s) détectée(s) [${q.questionType || currentExercise.exerciseType}]`);
+                }
+
                 // Reafficher la solution pour la nouvelle question
                 if (cachedSolution) {
                     displaySolutionForQuestion(currentQuestionIndex);
@@ -2181,193 +2731,458 @@
     // RESOLUTION VIA MISTRAL API
     // ===========================================
 
+    let solveProblemPending = null;
+    let solveProblemHash = null;
+
+    /**
+     * Extrait le contexte partagé entre toutes les questions.
+     * Dans un exercice multi-questions, Q1 contient souvent le graphique/intro commun.
+     * Ce contexte est inclus dans chaque appel API séparé pour que Q2 connaisse la fonction.
+     */
+    function extractSharedContext(questions) {
+        if (questions.length < 2) return '';
+        // Le contexte de Q1 sert de base partagée pour toutes les autres questions
+        return questions[0].context || '';
+    }
+
+    /**
+     * Envoie une requête API pour une question spécifique avec son propre type/prompt
+     * @param {object} question - La question à résoudre
+     * @param {number} questionIndex - Index de la question (0-based)
+     * @param {string} sharedContext - Contexte commun à toutes les questions (graphiques, etc.)
+     */
+    async function solveOneQuestion(question, questionIndex, sharedContext = '') {
+        const qType = question.questionType || 'input';
+        const systemPrompt = getSystemPrompt(qType);
+
+        let prompt = `Exercice de maths (type détecté: ${qType}):\n\n`;
+
+        // Inclure le contexte partagé pour Q2+ (pas Q1 qui est la source du contexte partagé)
+        if (sharedContext && questionIndex > 0) {
+            prompt += `Contexte commun à l'exercice (question précédente):\n${sharedContext}\n\n`;
+        }
+
+        prompt += `Question 1:\n`;
+        prompt += `${question.context}\n`;
+
+        if (question.type === 'qcm' && question.options.length > 0) {
+            prompt += `Options (QCM):\n`;
+            question.options.forEach(opt => {
+                prompt += `- ${opt.label}\n`;
+            });
+        } else if (question.type === 'checkbox' && question.options.length > 0) {
+            prompt += `Options (plusieurs reponses possibles):\n`;
+            question.options.forEach(opt => {
+                prompt += `- ${opt.label}\n`;
+            });
+        } else if (question.type === 'input') {
+            prompt += `Reponse a saisir\n`;
+        }
+
+        console.log(`[Kwyk Tutor] Appel API pour Q${questionIndex + 1} [type: ${qType}]${sharedContext ? ' + contexte partagé' : ''}`);
+
+        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.mistralApiKey}`
+            },
+            body: JSON.stringify({
+                model: config.model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: prompt }
+                ],
+                temperature: 0.3,
+                max_tokens: 2000
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`API (${response.status}): ${errorData.error?.message || 'Inconnue'}`);
+        }
+
+        const data = await response.json();
+        const content = data.choices[0]?.message?.content;
+
+        if (!content) throw new Error('Réponse vide');
+
+        console.log(`[Kwyk Tutor] Réponse brute Q${questionIndex + 1}:`, content);
+        return parseAIResponse(content);
+    }
+
+    /**
+     * Fusionne les résultats de plusieurs appels API (un par question)
+     */
+    function mergeResults(results) {
+        const merged = {
+            solution: {
+                notion: [],
+                methode: '',
+                etapes: [],
+                reponses: []
+            }
+        };
+
+        let questionOffset = 0;
+        results.forEach((result, i) => {
+            if (result.error) return;
+            const s = result.solution;
+            if (s.notion) merged.solution.notion.push(s.notion);
+            if (s.methode) merged.solution.methode += (merged.solution.methode ? '\n\n' : '') + `Q${i + 1}: ${s.methode}`;
+            if (s.etapes) merged.solution.etapes.push(...s.etapes.map(e => `Q${i + 1}: ${e}`));
+
+            // Renuméroter les réponses
+            if (s.reponses) {
+                s.reponses.forEach(r => {
+                    merged.solution.reponses.push({
+                        ...r,
+                        question: questionOffset + (r.question || 1)
+                    });
+                });
+                questionOffset += s.reponses.length;
+            }
+
+            // Garder le tableau si présent
+            if (s.tableau) {
+                merged.solution.tableau = s.tableau;
+            }
+        });
+
+        merged.solution.notion = merged.solution.notion.join(' | ');
+        return merged;
+    }
+
     async function solveProblem() {
         if (!config.mistralApiKey) {
             return { error: 'Cle API manquante. Va dans Options pour la configurer.' };
         }
 
-        const prompt = buildPrompt();
-
-        try {
-            const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${config.mistralApiKey}`
-                },
-                body: JSON.stringify({
-                    model: config.model,
-                    messages: [
-                        {
-                            role: 'system',
-                            content: getSystemPrompt()
-                        },
-                        {
-                            role: 'user',
-                            content: prompt
-                        }
-                    ],
-                    temperature: 0.3,
-                    max_tokens: 2000
-                })
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('[Kwyk Tutor] Erreur API:', errorData);
-                return { error: `Erreur API (${response.status}): ${errorData.error?.message || 'Inconnue'}` };
-            }
-
-            const data = await response.json();
-            const content = data.choices[0]?.message?.content;
-
-            if (!content) {
-                return { error: 'Reponse vide de l\'API' };
-            }
-
-            console.log('[Kwyk Tutor] Reponse brute:', content);
-
-            return parseAIResponse(content);
-
-        } catch (error) {
-            console.error('[Kwyk Tutor] Erreur:', error);
-            return { error: `Erreur: ${error.message}` };
+        // Déduplication
+        if (solveProblemPending && solveProblemHash === lastExerciseHash) {
+            console.log('[Kwyk Tutor] Requête déjà en cours, réutilisation');
+            return solveProblemPending;
         }
+
+        const exerciseType = currentExercise?.exerciseType || 'unknown';
+
+        solveProblemHash = lastExerciseHash;
+        solveProblemPending = (async () => {
+            try {
+                // Si les questions ont des types différents → un appel par question
+                const questionTypes = new Set(currentExercise.questions.map(q => q.questionType || 'input'));
+                if (questionTypes.size > 1) {
+                    console.log('[Kwyk Tutor] Exercice mixte: appels séparés par question');
+                    const sharedContext = extractSharedContext(currentExercise.questions);
+                    if (sharedContext) {
+                        console.log('[Kwyk Tutor] Contexte partagé extrait:', sharedContext);
+                    }
+                    const results = await Promise.all(
+                        currentExercise.questions.map((q, i) => solveOneQuestion(q, i, sharedContext).catch(err => ({ error: err.message })))
+                    );
+
+                    // Vérifier si toutes les requêtes ont échoué
+                    const allErrors = results.every(r => r.error);
+                    if (allErrors) {
+                        return { error: `Erreur: ${results[0].error}` };
+                    }
+
+                    const merged = mergeResults(results);
+                    // Stocker les solutions individuelles par question pour l'affichage ciblé
+                    merged.solution._perQuestion = results.map(r => r.error ? null : r.solution);
+                    return merged;
+                }
+
+                // Sinon → un seul appel classique
+                const prompt = buildPrompt();
+                const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${config.mistralApiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: config.model,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: getSystemPrompt(exerciseType)
+                            },
+                            {
+                                role: 'user',
+                                content: prompt
+                            }
+                        ],
+                        temperature: 0.3,
+                        max_tokens: 2000
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('[Kwyk Tutor] Erreur API:', errorData);
+                    return { error: `Erreur API (${response.status}): ${errorData.error?.message || 'Inconnue'}` };
+                }
+
+                const data = await response.json();
+                const content = data.choices[0]?.message?.content;
+
+                if (!content) {
+                    return { error: 'Reponse vide de l\'API' };
+                }
+
+                console.log('[Kwyk Tutor] Reponse brute:', content);
+                return parseAIResponse(content);
+
+            } catch (error) {
+                console.error('[Kwyk Tutor] Erreur:', error);
+                return { error: `Erreur: ${error.message}` };
+            } finally {
+                solveProblemPending = null;
+            }
+        })();
+
+        return solveProblemPending;
     }
 
-    function getSystemPrompt() {
-        const baseInstructions = `RÈGLES CRITIQUES pour le JSON:
-- N'utilise JAMAIS de caractères d'échappement comme \\n, \\t, \\x dans tes réponses
+    // ===========================================
+    // V15: PROMPTS MODULAIRES
+    // ===========================================
+
+    /**
+     * Prompt de base — commun à tous les types d'exercice.
+     * Règles JSON, formatage math, et structure générale.
+     */
+    function getBasePrompt() {
+        return `Tu es un assistant mathématique précis niveau lycée.
+Tu donnes les réponses correctes et complètes aux exercices Kwyk.
+La réponse doit être PRÊTE À COPIER-COLLER directement dans Kwyk.
+
+RÈGLES JSON:
+- N'utilise JAMAIS de caractères d'échappement comme \\n, \\t, \\x
 - Écris tout sur une seule ligne si nécessaire
-- Structure JSON STRICTE requise
+- Réponds UNIQUEMENT en JSON valide
 
-RÈGLES DE FORMATAGE MATHÉMATIQUE (TRÈS IMPORTANT):
-- Pour les FRACTIONS: utilise UNIQUEMENT des PARENTHÈSES (), JAMAIS de crochets []
-  Correct: (x+14)/((x+2)(x-2))
-  INCORRECT: (x+14)/[(x+2)(x-2)]
-- Pour les RACINES: utilise √ ou sqrt(). Exemple: √5 ou sqrt(5), JAMAIS "racine carrée de 5"
-- Pour FRACTION × RACINE: coefficient DEVANT la racine ! Exemple: (1)/(12)√4097 (JAMAIS √4097/12)
-- Pour les PUISSANCES: utilise ^. Exemple: x^2 pour x²
-- Pour la MULTIPLICATION: n'utilise PAS le symbole *. Écrire 3x et non 3*x
-- TOUJOURS écrire les fractions au format (numérateur)/(dénominateur), MÊME dans les sous-expressions !
-  Correct: √((3 - (-3)/(4))^2) ou (1)/(3)
-  INCORRECT: √((3 - (-3/4))^2) ou 1/3 ou -3/4
+FORMATAGE MATHÉMATIQUE:
+- Fractions: TOUJOURS (numérateur)/(dénominateur) avec parenthèses. Correct: (1)/(3), (x+1)/(x-2). INCORRECT: 1/3, x+1/x-2
+- Racines: √ ou sqrt(). JAMAIS "racine carrée de"
+- Puissances: x^2 pour x²
+- Multiplication: JAMAIS de *. Écrire 3x, PAS 3*x
+- Domaines ensemble: ℝ{4} (si l'énoncé demande un ensemble)
+- Domaines intervalle: ]-∞;4[∪]4;+∞[ (si l'énoncé demande un intervalle)
 
-DOMAINES DE DÉFINITION (lis bien l'énoncé !):
-- Si l'énoncé demande "sous forme d'ENSEMBLE" ou montre ℝ\\{...} → notation ENSEMBLE: ℝ{4} (accolades SANS backslash)
-- Si l'énoncé demande "INTERVALLE" → notation INTERVALLE: ]-∞;4[∪]4;+∞[
-- Pour les ensembles, utilise le format ℝ{valeur} - le programme convertira automatiquement
-
-TABLEAUX DE SIGNES (V14):
-- Pour les tableaux de SIGNES, donne CHAQUE valeur à remplir dans une réponse séparée (une string par case)
-- Utilise + pour positif, - pour négatif, 0 pour nul
-- Numérote les cases de gauche à droite, haut en bas
-- IMPORTANT: chaque élément de "reponses" doit avoir un champ "reponse" (string), PAS un sous-tableau d'objets
-  Exemple correct: {"question": 1, "type": "input", "reponse": "+"}
-  Exemple INCORRECT: {"question": 1, "reponses": [{"case": 1, "valeur": "+"}]}
-- EN PLUS, ajoute un champ "tableau" à la RACINE du JSON (même niveau que notion/methode/etapes/reponses) :
-  "tableau": {
-    "type": "signes",
-    "headers": ["x", "-∞", "valeur1", "+∞"],
-    "rows": [
-      {"label": "2x+6", "values": ["-", "0", "+", "+"]}
-    ]
-  }
-  Ce champ sert uniquement à l'affichage structuré. Le champ "reponses" reste obligatoire.
-
-TABLEAUX DE VARIATIONS (V14):
-- Pour les tableaux de VARIATIONS (sens de variation d'une fonction), donne TOUTES les valeurs attendues par Kwyk dans "reponses" : valeurs numériques aux bornes, aux extremums, ET les flèches ↗/↘
-- Numérote les cases de gauche à droite, haut en bas
-- IMPORTANT: chaque élément de "reponses" doit avoir un champ "reponse" (string)
-  Exemples: {"question": 1, "type": "input", "reponse": "-19"}, {"question": 2, "type": "input", "reponse": "↗"}, {"question": 3, "type": "input", "reponse": "30"}
-- EN PLUS, ajoute un champ "tableau" à la RACINE du JSON :
-  "tableau": {
-    "type": "variation",
-    "headers": ["x", "-3", "4"],
-    "rows": [
-      {"label": "f(x)", "values": ["-19", "↗", "30"]}
-    ]
-  }
-  Convention : les values alternent entre valeurs numériques et flèches (↗ ou ↘).
-  La position haut/bas est déduite automatiquement par l'extension :
-  - Avant ↗ → valeur en bas (la fonction va monter)
-  - Après ↗ → valeur en haut (la fonction vient de monter)
-  - Avant ↘ → valeur en haut (la fonction va descendre)
-  - Après ↘ → valeur en bas (la fonction vient de descendre)
-
-REPRÉSENTATIONS GRAPHIQUES:
-- Les graphiques sont décrits sous la forme [Graphique A : y = expression]. Analyse l'expression pour identifier le type de fonction.
-- RAPPEL MATHÉMATIQUE IMPORTANT (inclusions de fonctions):
-  * Une fonction CONSTANTE f(x) = k est un CAS PARTICULIER de fonction AFFINE (avec a=0)
-  * Une fonction LINÉAIRE f(x) = ax est un CAS PARTICULIER de fonction AFFINE (avec b=0)
-  * Donc si on demande "constante ET/OU affine ?", une constante est AUSSI affine → coche les DEUX
-  * Si on demande "linéaire ET/OU affine ?", une linéaire est AUSSI affine → coche les DEUX
-- Pour les QCM de type de fonction, prends en compte ces INCLUSIONS
-
-TABLEAUX DE VALEURS:
-- Les tableaux de valeurs sont présentés entre [Tableau] et [/Tableau] avec des colonnes séparées par |
-- Pour un tableau de valeurs avec un ? (valeur manquante), calcule la valeur et donne UNIQUEMENT le résultat numérique
-- Exemple: si le tableau montre une fonction linéaire f avec f(-8)=-2 et on demande f(-6), calcule le coefficient puis la valeur
-
-`;
-
-        // V12: Un seul prompt pour TOUS les modes (garantit cohérence des réponses)
-        // Le mode affecte uniquement l'AFFICHAGE, pas le contenu généré par l'IA
-        return baseInstructions + `Tu es un assistant mathématique précis niveau lycée.
-Tu donnes les réponses correctes et complètes aux exercices.
-IMPORTANT: La réponse doit être PRÊTE À COPIER-COLLER directement dans Kwyk.
-Tu dois être capable de renseigner le bon type d'exercice : soit "qcm" (on doit cocher une option) soit "input" (exercices où il faut saisir une réponse)
-
-RÈGLE STRICTE POUR LE CHAMP "reponse":
-- Le champ "reponse" doit contenir UNIQUEMENT la valeur à entrer ou l'option à cocher
-- Le champ "reponse" doit contenir le RÉSULTAT FINAL du calcul, JAMAIS une étape intermédiaire
-- PAS d'explication, PAS de justification, PAS de phrase
-- JAMAIS de symbole * pour la multiplication ! Écrire "8x" et non "8*x", "-3ab" et non "-3*a*b"
-- Exemples corrects: "42", "(3)/(5)", "A", "√7", "x^2 + 3", "-8x", "3xy"
-- Exemples INCORRECTS: "8*x", "3*x*y", "La réponse est 42 car...", une étape intermédiaire
-
-Réponds UNIQUEMENT en JSON valide avec cette structure:
-
-Pour QCM simple (une seule réponse):
-{
-  "notion": "Concept mathématique",
-  "methode": "Formule utilisée. Fractions: (a)/(b). Racines: √ ou sqrt()",
-  "etapes": ["Étape 1 du calcul", "Étape 2"],
-  "reponses": [
-    {
-      "question": 1,
-      "type": "qcm/input",
-      "reponse": "VALEUR SEULE (ex: 42, A, (3)/(5), √7)",
-      "explication": "Explication détaillée ici"
+RÈGLE STRICTE POUR "reponse":
+- Contient UNIQUEMENT la valeur finale, JAMAIS d'explication ni d'étape intermédiaire
+- Exemples corrects: "42", "(3)/(5)", "A", "√7", "x^2 + 3"
+- Exemples INCORRECTS: "La réponse est 42", "8*x", une étape intermédiaire`;
     }
-  ]
-}
 
-Pour QCM multiple (plusieurs cases à cocher):
+    /**
+     * Module prompt spécifique au type d'exercice.
+     * Contient le format JSON attendu + un exemple concret (few-shot).
+     */
+    function getTypePrompt(exerciseType) {
+        const typePrompts = {
+
+            qcm_simple: `
+TYPE D'EXERCICE: QCM simple (une seule réponse à cocher parmi les options).
+
+Réponds avec ce JSON exact:
 {
   "notion": "Concept mathématique",
-  "methode": "Formule utilisée",
+  "methode": "Méthode de résolution",
   "etapes": ["Étape 1", "Étape 2"],
   "reponses": [
-    {
-      "question": 1,
-      "type": "qcm_multiples",
-      "reponses": ["A", "B", "D"],
-      "explication": "Explication détaillée ici"
-    }
+    {"question": 1, "type": "qcm", "reponse": "LETTRE ou TEXTE EXACT de l'option", "explication": "Justification"}
   ]
 }
 
-IMPORTANT: Pour les QCM simples, utilise "reponse" (singulier). Pour les QCM multiples, utilise "reponses" (pluriel) avec un array.
-RAPPEL: Le champ "reponse" = VALEUR SEULE. Le champ "explication" = détails et justifications.
-RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
+EXEMPLE — Énoncé: "Quelle est la forme factorisée de x²-9 ? A) (x-3)² B) (x+3)(x-3) C) (x+9)(x-9)"
+Réponse:
+{"notion": "Identités remarquables", "methode": "a²-b² = (a+b)(a-b)", "etapes": ["x²-9 = x²-3²", "On applique a²-b² = (a+b)(a-b)", "x²-9 = (x+3)(x-3)"], "reponses": [{"question": 1, "type": "qcm", "reponse": "B", "explication": "x²-9 = x²-3² = (x+3)(x-3), c'est l'identité remarquable a²-b²"}]}`,
+
+            qcm_multiple: `
+TYPE D'EXERCICE: QCM multiple (plusieurs cases à cocher).
+
+Réponds avec ce JSON exact:
+{
+  "notion": "Concept mathématique",
+  "methode": "Méthode de résolution",
+  "etapes": ["Étape 1", "Étape 2"],
+  "reponses": [
+    {"question": 1, "type": "qcm_multiples", "reponses": ["A", "C"], "explication": "Justification"}
+  ]
+}
+
+IMPORTANT: utilise "reponses" (pluriel) avec un ARRAY de lettres/textes.
+
+EXEMPLE — Énoncé: "Parmi ces fonctions, lesquelles sont affines ? A) f(x)=3 B) f(x)=x² C) f(x)=2x+1 D) f(x)=√x"
+Réponse:
+{"notion": "Fonctions affines", "methode": "Une fonction affine est de la forme f(x)=ax+b", "etapes": ["f(x)=3 est affine (a=0, b=3, constante est un cas particulier d'affine)", "f(x)=x² n'est pas affine (degré 2)", "f(x)=2x+1 est affine (a=2, b=1)", "f(x)=√x n'est pas affine"], "reponses": [{"question": 1, "type": "qcm_multiples", "reponses": ["A", "C"], "explication": "f(x)=3 (constante=affine avec a=0) et f(x)=2x+1 sont de la forme ax+b"}]}`,
+
+            input: `
+TYPE D'EXERCICE: Saisie de réponse (champ texte ou MathQuill).
+
+Réponds avec ce JSON exact:
+{
+  "notion": "Concept mathématique",
+  "methode": "Méthode de résolution",
+  "etapes": ["Étape 1", "Étape 2"],
+  "reponses": [
+    {"question": 1, "type": "input", "reponse": "VALEUR EXACTE", "explication": "Justification"}
+  ]
+}
+
+S'il y a plusieurs questions, ajoute un objet par question dans "reponses" avec le bon numéro.
+
+EXEMPLE — Énoncé: "Résoudre 2x + 6 = 0"
+Réponse:
+{"notion": "Équation du premier degré", "methode": "Isoler x: ax + b = 0 → x = -b/a", "etapes": ["2x + 6 = 0", "2x = -6", "x = (-6)/(2)", "x = -3"], "reponses": [{"question": 1, "type": "input", "reponse": "-3", "explication": "2x + 6 = 0 donc 2x = -6 donc x = -3"}]}`,
+
+            tableau_signes: `
+TYPE D'EXERCICE: Tableau de signes à compléter.
+
+Chaque case du tableau est une réponse séparée. Utilise +, -, 0 ou || (valeur interdite).
+Numérote les cases de gauche à droite.
+
+Réponds avec ce JSON exact:
+{
+  "notion": "Concept mathématique",
+  "methode": "Méthode de résolution",
+  "etapes": ["Étape 1", "Étape 2"],
+  "reponses": [
+    {"question": 1, "type": "input", "reponse": "+"},
+    {"question": 2, "type": "input", "reponse": "0"},
+    {"question": 3, "type": "input", "reponse": "-"}
+  ],
+  "tableau": {
+    "type": "signes",
+    "headers": ["x", "-∞", "valeur_critique", "+∞"],
+    "rows": [{"label": "f(x)", "values": ["+", "0", "-"]}]
+  }
+}
+
+RÈGLES STRICTES:
+- Le tableau a TOUJOURS une SEULE row, label TOUJOURS "f(x)"
+- Pattern: signe, 0, signe, 0, signe... (alternance signes et zéros aux valeurs critiques)
+- 1 valeur critique → 3 values. 2 valeurs critiques → 5 values. JAMAIS deux signes consécutifs sans 0.
+
+VÉRIFICATION OBLIGATOIRE du signe aux extrémités:
+- Fonction affine (degré 1): si a > 0 → commence par -, finit par +. Si a < 0 → commence par +, finit par -.
+- Fonction du second degré (degré 2): si a > 0 → commence par +, finit par + (parabole ouverte vers le haut). Si a < 0 → commence par -, finit par - (parabole ouverte vers le bas).
+- TOUJOURS vérifier le signe du coefficient dominant AVANT d'écrire les values. Le premier et dernier signe dépendent UNIQUEMENT du coefficient dominant et du degré.
+
+EXEMPLE 1 — Énoncé: "Tableau de signes de f(x) = 2x - 4"
+Réponse:
+{"notion": "Signe d'une fonction affine", "methode": "f(x) = 0 quand x = 2. Coefficient a=2 > 0 donc f est croissante: négative avant 2, positive après", "etapes": ["2x - 4 = 0", "x = 2", "a = 2 > 0: négatif avant 2, positif après"], "reponses": [{"question": 1, "type": "input", "reponse": "-"}, {"question": 2, "type": "input", "reponse": "0"}, {"question": 3, "type": "input", "reponse": "+"}], "tableau": {"type": "signes", "headers": ["x", "-∞", "2", "+∞"], "rows": [{"label": "f(x)", "values": ["-", "0", "+"]}]}}
+
+EXEMPLE 2 — Énoncé: "Tableau de signes de f(x) = (-x-1)(6x-4)"
+Réponse:
+{"notion": "Signe d'un trinôme", "methode": "Racines: -x-1=0 → x=-1, 6x-4=0 → x=2/3. Développé: -6x²+4x+6x-4 = -6x²+10x-4. Coefficient dominant a=-6 < 0 → parabole ouverte vers le bas → commence par -, finit par -", "etapes": ["-x-1=0 → x=-1", "6x-4=0 → x=2/3", "a=-6 < 0: commence par -, finit par -", "Signes: -, 0, +, 0, -"], "reponses": [{"question": 1, "type": "input", "reponse": "-"}, {"question": 2, "type": "input", "reponse": "0"}, {"question": 3, "type": "input", "reponse": "+"}, {"question": 4, "type": "input", "reponse": "0"}, {"question": 5, "type": "input", "reponse": "-"}], "tableau": {"type": "signes", "headers": ["x", "-∞", "-1", "2/3", "+∞"], "rows": [{"label": "f(x)", "values": ["-", "0", "+", "0", "-"]}]}}`,
+
+            tableau_variations: `
+TYPE D'EXERCICE: Tableau de variations à compléter.
+
+Donne TOUTES les valeurs: numériques aux bornes/extremums ET les flèches ↗ (croissant) / ↘ (décroissant).
+Numérote les cases de gauche à droite.
+
+RÈGLE ABSOLUE — FORMAT DES VALUES:
+- Le tableau de variations Kwyk ne contient QUE des flèches (↗ ou ↘) et des séparateurs (||).
+- Ne mets JAMAIS de valeurs numériques (0, -∞, +∞, etc.) dans "values".
+- Format toujours: ["↘", "↗", "||", ...] uniquement.
+- Exemple CORRECT: "values": ["↘", "||", "↘"]
+- Exemple INTERDIT: "values": ["0", "↘", "-∞", "||", "+∞", "↘", "0"]
+
+Réponds avec ce JSON exact:
+{
+  "notion": "Concept mathématique",
+  "methode": "Méthode de résolution",
+  "etapes": ["Étape 1", "Étape 2"],
+  "reponses": [
+    {"question": 1, "type": "input", "reponse": "↘"},
+    {"question": 2, "type": "input", "reponse": "↗"}
+  ],
+  "tableau": {
+    "type": "variation",
+    "headers": ["x", "-2", "1", "4"],
+    "rows": [{"label": "f(x)", "values": ["↘", "↗"]}]
+  }
+}
+
+Les values contiennent UNIQUEMENT des flèches (↗/↘) et des séparateurs (||). JAMAIS de valeurs numériques.
+- Fonction continue sur [a,b]: "values": ["↘"] ou ["↗"] ou ["↗", "↘"] selon les variations
+- Fonction avec asymptote (point exclu): "values": ["↘", "||", "↘"] (les deux intervalles séparés par ||)
+
+EXEMPLE 1 — Fonction continue: "Tableau de variations de f(x) = x² - 6x + 5 sur [-1; 5]"
+Réponse:
+{"notion": "Variations d'un polynôme du 2nd degré", "methode": "f'(x) = 2x - 6 = 0 quand x = 3. a > 0 donc f décroît puis croît", "etapes": ["f'(x) = 2x - 6", "f'(x) = 0 → x = 3", "Décroissante sur [-1;3], croissante sur [3;5]"], "reponses": [{"question": 1, "type": "input", "reponse": "↘"}, {"question": 2, "type": "input", "reponse": "↗"}], "tableau": {"type": "variation", "headers": ["x", "-1", "3", "5"], "rows": [{"label": "f(x)", "values": ["↘", "↗"]}]}}
+
+EXEMPLE 2 — Fonction avec asymptote: "Tableau de variations de f(x) = (1)/(x)"
+Réponse:
+{"notion": "Variations de la fonction inverse", "methode": "f'(x) = -1/x² < 0 pour tout x ≠ 0 → décroissante sur ]-∞;0[ et ]0;+∞[. Asymptote verticale en x=0.", "etapes": ["f'(x) = -1/x² toujours négatif", "Sur ]-∞;0[: décroissante", "Sur ]0;+∞[: décroissante", "Discontinuité en x=0 (asymptote verticale)"], "reponses": [{"question": 1, "type": "input", "reponse": "↘"}, {"question": 2, "type": "input", "reponse": "↘"}], "tableau": {"type": "variation", "headers": ["x", "-∞", "0", "+∞"], "rows": [{"label": "f(x)", "values": ["↘", "||", "↘"]}]}}`,
+
+            tableau_valeurs: `
+TYPE D'EXERCICE: Tableau de valeurs avec valeur(s) manquante(s) à calculer.
+
+Le tableau est présenté entre [Tableau] et [/Tableau] avec des colonnes séparées par |.
+Calcule la/les valeur(s) manquante(s) (marquées par ?).
+
+Réponds avec ce JSON exact:
+{
+  "notion": "Concept mathématique",
+  "methode": "Méthode de résolution",
+  "etapes": ["Étape 1", "Étape 2"],
+  "reponses": [
+    {"question": 1, "type": "input", "reponse": "VALEUR NUMÉRIQUE", "explication": "Justification"}
+  ]
+}
+
+EXEMPLE — Énoncé: "f est linéaire. [Tableau] x | -8 | -6 / f(x) | -2 | ? [/Tableau]"
+Réponse:
+{"notion": "Fonction linéaire", "methode": "f(x) = ax. On trouve a avec f(-8) = -2", "etapes": ["f(x) = ax", "f(-8) = -8a = -2 donc a = (1)/(4)", "f(-6) = (1)/(4) × (-6) = (-6)/(4) = (-3)/(2)"], "reponses": [{"question": 1, "type": "input", "reponse": "(-3)/(2)", "explication": "a = (1)/(4), donc f(-6) = (-3)/(2)"}]}`,
+
+            graphique: `
+TYPE D'EXERCICE: Identification de fonctions à partir de graphiques.
+
+Les graphiques sont décrits sous la forme [Graphique A : y = expression].
+Analyse chaque expression pour identifier le type de fonction.
+
+INCLUSIONS IMPORTANTES:
+- Constante f(x) = k → c'est AUSSI une fonction affine (a=0)
+- Linéaire f(x) = ax → c'est AUSSI une fonction affine (b=0)
+- Si on demande "constante ET/OU affine ?", une constante est AUSSI affine → coche les DEUX
+- Si on demande "linéaire ET/OU affine ?", une linéaire est AUSSI affine → coche les DEUX
+
+Adapte le format JSON au type de question (QCM ou input) selon les options proposées.
+
+EXEMPLE — Énoncé: "Le graphique A : y = 3x + 2 représente une fonction: A) linéaire B) affine C) ni l'une ni l'autre"
+Réponse:
+{"notion": "Classification des fonctions", "methode": "f(x) = ax + b est affine. Si b=0, elle est aussi linéaire", "etapes": ["y = 3x + 2 est de la forme ax + b avec a=3, b=2", "b ≠ 0 donc ce n'est pas linéaire", "C'est une fonction affine"], "reponses": [{"question": 1, "type": "qcm", "reponse": "B", "explication": "y = 3x + 2 est affine (forme ax+b) mais pas linéaire car b=2 ≠ 0"}]}`
+        };
+
+        return typePrompts[exerciseType] || typePrompts['input'];
+    }
+
+    /**
+     * V15: Construit le system prompt modulaire.
+     * Combine le prompt de base + le module spécifique au type d'exercice détecté.
+     */
+    function getSystemPrompt(exerciseType) {
+        if (!exerciseType || exerciseType === 'unknown') {
+            exerciseType = 'input';
+        }
+        console.log(`[Kwyk Tutor] Prompt modulaire pour type: ${exerciseType}`);
+        return getBasePrompt() + '\n\n' + getTypePrompt(exerciseType);
     }
 
     function buildPrompt() {
-        let prompt = `Exercice de maths:\n\n`;
+        const exerciseType = currentExercise?.exerciseType || 'unknown';
+        let prompt = `Exercice de maths (type détecté: ${exerciseType}):\n\n`;
 
         currentExercise.questions.forEach((q, i) => {
-            prompt += `Question ${i + 1}:\n`;
+            const qType = q.questionType || exerciseType;
+            prompt += `Question ${i + 1} [type: ${qType}]:\n`;
             prompt += `${q.context}\n`;
 
             if (q.type === 'qcm' && q.options.length > 0) {
@@ -2394,12 +3209,17 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
      * Nettoie le JSON de manière ultra-robuste
      */
     function cleanJSON(jsonStr) {
-        // 1. Enlever les backticks Markdown
+        // 1. Enlever les backticks Markdown et tout texte après le bloc ```
         jsonStr = jsonStr.trim();
         if (jsonStr.startsWith('```json')) {
-            jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+            jsonStr = jsonStr.replace(/^```json\s*/, '');
+            // Couper à la première fermeture ``` (pas seulement en fin de string)
+            const closeIdx = jsonStr.indexOf('```');
+            if (closeIdx !== -1) jsonStr = jsonStr.substring(0, closeIdx);
         } else if (jsonStr.startsWith('```')) {
-            jsonStr = jsonStr.replace(/^```\s*/, '').replace(/\s*```$/, '');
+            jsonStr = jsonStr.replace(/^```\s*/, '');
+            const closeIdx = jsonStr.indexOf('```');
+            if (closeIdx !== -1) jsonStr = jsonStr.substring(0, closeIdx);
         }
 
         // 2. SOLUTION SIMPLE : Remplacer TOUS les retours à la ligne par des espaces
@@ -2441,9 +3261,13 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
         try {
             // Essayer directement d'abord
             const cleaned1 = content.trim();
-            const test1 = cleaned1.startsWith('```') 
-                ? cleaned1.replace(/^```json?\s*/, '').replace(/\s*```$/, '')
-                : cleaned1;
+            let test1 = cleaned1;
+            if (cleaned1.startsWith('```')) {
+                test1 = cleaned1.replace(/^```json?\s*/, '');
+                const closeIdx = test1.indexOf('```');
+                if (closeIdx !== -1) test1 = test1.substring(0, closeIdx);
+                test1 = test1.trim();
+            }
             
             const parsed = JSON.parse(test1);
             return formatSolution(parsed);
@@ -2517,7 +3341,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
 
     function formatSolution(parsed) {
         const solution = {
-            notion: parsed.notion || 'Mathematiques',
+            notion: parsed.notion || 'Mathématiques',
             methode: Array.isArray(parsed.methode) ? parsed.methode.join(' ') : (parsed.methode || ''),
             etapes: Array.isArray(parsed.etapes) ? parsed.etapes : [],
             reponses: []
@@ -2560,14 +3384,37 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
                         });
                     }
                 } else if (r.reponse) {
-                    // QCM classique avec une seule réponse - VALIDER la réponse
-                    const cleanReponse = validateReponse(r.reponse);
-                    solution.reponses.push({
-                        question: r.question,
-                        type: r.type || 'qcm',
-                        reponse: cleanReponse,
-                        explication: r.explication || ''
-                    });
+                    // V15: Normaliser reponse en string si l'IA renvoie un array/objet
+                    let rawReponse = r.reponse;
+                    if (Array.isArray(rawReponse)) {
+                        // Array d'objets → extraire les valeurs utiles en réponses individuelles
+                        rawReponse.forEach((item, idx) => {
+                            const val = typeof item === 'string' ? item : (item.symbole || item.valeur || item.reponse || JSON.stringify(item));
+                            solution.reponses.push({
+                                question: r.question ? `${r.question}.${idx + 1}` : idx + 1,
+                                type: r.type || 'input',
+                                reponse: validateReponse(String(val)),
+                                explication: r.explication || ''
+                            });
+                        });
+                    } else if (typeof rawReponse === 'object') {
+                        const val = rawReponse.symbole || rawReponse.valeur || rawReponse.reponse || JSON.stringify(rawReponse);
+                        solution.reponses.push({
+                            question: r.question,
+                            type: r.type || 'input',
+                            reponse: validateReponse(String(val)),
+                            explication: r.explication || ''
+                        });
+                    } else {
+                        // String normal - VALIDER la réponse
+                        const cleanReponse = validateReponse(rawReponse);
+                        solution.reponses.push({
+                            question: r.question,
+                            type: r.type || 'qcm',
+                            reponse: cleanReponse,
+                            explication: r.explication || ''
+                        });
+                    }
                 }
             });
         }
@@ -2583,7 +3430,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
         console.log('[Kwyk Tutor] Utilisation du fallback parsing');
 
         const solution = {
-            notion: 'Mathematiques',
+            notion: 'Mathématiques',
             methode: '',
             etapes: [],
             reponses: []
@@ -2676,7 +3523,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
         if (isLoading) return;
 
         if (!currentExercise || currentExercise.questions.length === 0) {
-            showResponse('Aucun exercice detecte sur cette page.', 'error');
+            showResponse('Aucun exercice détecté sur cette page.', 'error');
             return;
         }
 
@@ -2684,7 +3531,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
         disableButtons(true);
 
         if (!cachedSolution) {
-            showLoading('Resolution...');
+            showLoading('Résolution...');
             updateStatus('Calcul...', 'loading');
 
             const result = await solveProblem();
@@ -2713,7 +3560,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
                 return;
             }
 
-            updateStatus('✓ Resolu', 'success');
+            updateStatus('✓ Résolu', 'success');
         }
 
         isLoading = false;
@@ -2735,9 +3582,16 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
     function displaySolutionForQuestion(questionIndex, mode = 'answer') {
         if (!cachedSolution) return;
 
-        const s = cachedSolution;
+        // Utiliser la solution individuelle si disponible (exercice mixte avec appels séparés)
+        const s = (cachedSolution._perQuestion && cachedSolution._perQuestion[questionIndex])
+            ? cachedSolution._perQuestion[questionIndex]
+            : cachedSolution;
+
         const question = currentExercise.questions[questionIndex];
-        const reponse = s.reponses[questionIndex];
+        // La réponse est à l'index 0 dans la solution individuelle, ou à questionIndex dans la solution fusionnée
+        const reponse = (cachedSolution._perQuestion && cachedSolution._perQuestion[questionIndex])
+            ? s.reponses?.[0]
+            : s.reponses?.[questionIndex];
 
         if (!question || !reponse) {
             showResponse(`Pas de solution pour la question ${questionIndex + 1}`, 'error');
@@ -2750,14 +3604,14 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
             case 'explain':
                 html = `
                     <div class="kwyk-section-notion">
-                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion)}
+                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || '')}
                     </div>
                     ${s.methode ? `
                     <div class="kwyk-section-formula">
-                        <span class="kwyk-badge formula">Methode</span>
+                        <span class="kwyk-badge formula">Méthode</span>
                         <div style="margin-top:8px; line-height:1.5">${formatFractions(escapeHtml(s.methode))}</div>
                     </div>` : ''}
-                    ${s.etapes.length > 0 ? `
+                    ${(s.etapes || []).length > 0 ? `
                     <div class="kwyk-section-title">Raisonnement</div>
                     <div class="kwyk-steps">
                         ${s.etapes.map((e, i) => `<div class="kwyk-step">${i + 1}. ${formatFractions(escapeHtml(String(e)))}</div>`).join('')}
@@ -2768,16 +3622,16 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
             case 'hint':
                 html = `
                     <div class="kwyk-section-notion">
-                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion)}
+                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || '')}
                     </div>
                     ${s.methode ? `
                     <div class="kwyk-section-formula">
-                        <span class="kwyk-badge formula">Methode</span>
+                        <span class="kwyk-badge formula">Méthode</span>
                         <div style="margin-top:8px; line-height:1.5">${formatFractions(escapeHtml(s.methode))}</div>
                     </div>` : ''}
                     <div class="kwyk-section-hint">
                         <span class="kwyk-badge hint">Indice</span>
-                        ${s.etapes[0] ? formatFractions(escapeHtml(String(s.etapes[0]))) : 'Applique la methode ci-dessus'}
+                        ${s.etapes?.[0] ? formatFractions(escapeHtml(String(s.etapes[0]))) : 'Applique la méthode ci-dessus'}
                     </div>
                 `;
                 break;
@@ -2818,11 +3672,11 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
             case 'explain':
                 html = `
                     <div class="kwyk-section-notion">
-                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || 'Mathematiques')}
+                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || 'Mathématiques')}
                     </div>
                     ${s.methode ? `
                     <div class="kwyk-section-formula">
-                        <span class="kwyk-badge formula">Methode</span>
+                        <span class="kwyk-badge formula">Méthode</span>
                         <div style="margin-top:8px; line-height:1.5">${formatFractions(escapeHtml(s.methode))}</div>
                     </div>` : ''}
                     ${s.etapes.length > 0 ? `
@@ -2836,16 +3690,16 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
             case 'hint':
                 html = `
                     <div class="kwyk-section-notion">
-                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || 'Mathematiques')}
+                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || 'Mathématiques')}
                     </div>
                     ${s.methode ? `
                     <div class="kwyk-section-formula">
-                        <span class="kwyk-badge formula">Methode</span>
+                        <span class="kwyk-badge formula">Méthode</span>
                         <div style="margin-top:8px; line-height:1.5">${formatFractions(escapeHtml(s.methode))}</div>
                     </div>` : ''}
                     <div class="kwyk-section-hint">
                         <span class="kwyk-badge hint">Indice</span>
-                        ${s.etapes[0] ? formatFractions(escapeHtml(String(s.etapes[0]))) : 'Applique la methode ci-dessus'}
+                        ${s.etapes[0] ? formatFractions(escapeHtml(String(s.etapes[0]))) : 'Applique la méthode ci-dessus'}
                     </div>
                 `;
                 break;
@@ -2937,19 +3791,40 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
         let html = '<div class="kwyk-sign-table-wrapper">';
         html += '<table class="kwyk-sign-table">';
 
-        // Ligne d'en-tête (valeurs de x)
+        // V15: Alignement correct du tableau de signes
+        // -∞ au-dessus du premier signe, +∞ au-dessus du dernier signe
+        // Colonnes vides seulement entre les valeurs critiques
+        //
+        // Exemple: headers [x, -∞, -1, 2/3, +∞], values [+, 0, -, 0, +]
+        // Header:  x | -∞ | -1 |    | 2/3 | +∞
+        // Values: f(x)| +  |  0 |  - |  0  |  +
+        const boundaries = tableau.headers.slice(1); // [-∞, c1, c2, ..., +∞]
+        const criticals = boundaries.slice(1, -1);   // [c1, c2, ...] sans ±∞
+
+        // Construire le header étendu : -∞, c1, (vide), c2, (vide), c3, +∞
         html += '<tr class="kwyk-sign-table-header">';
-        tableau.headers.forEach(h => {
-            html += `<th>${formatFractionHtml(escapeHtml(String(h)))}</th>`;
-        });
+        html += `<th>${formatFractionHtml(escapeHtml(String(tableau.headers[0] || 'x')))}</th>`;
+        html += `<th>${formatFractionHtml(escapeHtml(String(boundaries[0] || '-∞')))}</th>`; // -∞
+        for (let i = 0; i < criticals.length; i++) {
+            html += `<th>${formatFractionHtml(escapeHtml(String(criticals[i])))}</th>`;
+            if (i < criticals.length - 1) {
+                html += '<th></th>'; // colonne vide entre deux valeurs critiques
+            }
+        }
+        html += `<th>${formatFractionHtml(escapeHtml(String(boundaries[boundaries.length - 1] || '+∞')))}</th>`; // +∞
         html += '</tr>';
 
-        // Lignes de signes/variations
+        // Nombre total de colonnes data = boundaries + (criticals - 1) vides
+        const totalCols = boundaries.length + Math.max(0, criticals.length - 1);
+
+        // Ligne de valeurs : les values se mappent 1:1 sur les colonnes
         tableau.rows.forEach(row => {
+            const vals = row.values || [];
             html += '<tr>';
-            html += `<td class="kwyk-sign-table-label">f(x)</td>`;
-            (row.values || []).forEach(v => {
-                const val = String(v);
+            html += `<td class="kwyk-sign-table-label">${escapeHtml(String(row.label || 'f(x)'))}</td>`;
+
+            for (let i = 0; i < totalCols; i++) {
+                const val = i < vals.length ? String(vals[i]) : '';
                 let cls = '';
                 if (val === '+') cls = 'sign-pos';
                 else if (val === '-' || val === '\u2212') cls = 'sign-neg';
@@ -2957,7 +3832,101 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
                 else if (val === '↗') cls = 'sign-up';
                 else if (val === '↘') cls = 'sign-down';
                 else if (val === '||') cls = 'sign-forbidden';
-                html += `<td class="kwyk-sign-table-val ${cls}">${escapeHtml(val)}</td>`;
+                else if (val === '') cls = 'sign-empty';
+                html += `<td class="kwyk-sign-table-val ${cls}">${val ? escapeHtml(val) : ''}</td>`;
+            }
+            html += '</tr>';
+        });
+
+        html += '</table></div>';
+        return html;
+    }
+
+    /**
+     * Affiche un tableau de variations simple (flèches uniquement, sans valeurs de f aux bornes).
+     * Format values: ["↘", "||", "↘"] ou ["↗", "↘"]
+     * Produit: x | -∞ | (interval) | 0(sep) | (interval) | +∞
+     *          f |    |     ↘      |  ||   |      ↘      |
+     */
+    function renderSimpleVariationTable(tableau) {
+        const headers = tableau.headers || [];
+        const rows = tableau.rows || [];
+        const boundaries = headers.slice(1);
+        const firstValues = rows.length > 0 ? (rows[0].values || []).map(String) : [];
+
+        // Construire les colonnes en intercalant bornes et intervalles
+        // Ex: boundaries=["-∞","0","+∞"], values=["↘","||","↘"]
+        // → cols: [boundary:-∞, interval:↘, separator:0, interval:↘, boundary:+∞]
+        const cols = [];
+        let bIdx = 0;
+        cols.push({ type: 'boundary', label: boundaries[bIdx++] || '' });
+        for (let i = 0; i < firstValues.length; i++) {
+            const val = firstValues[i];
+            if (val === '||') {
+                cols.push({ type: 'separator', label: boundaries[bIdx++] || '' });
+            } else {
+                cols.push({ type: 'interval', arrow: val });
+            }
+        }
+        if (firstValues.length > 0 && firstValues[firstValues.length - 1] !== '||') {
+            cols.push({ type: 'boundary', label: boundaries[bIdx] || '' });
+        }
+
+        let html = '<div class="kwyk-variation-table-wrapper">';
+        html += '<table class="kwyk-variation-table">';
+
+        // Ligne x (header)
+        html += '<tr class="kwyk-variation-header">';
+        html += `<th>${escapeHtml(String(headers[0] || 'x'))}</th>`;
+        cols.forEach(col => {
+            if (col.type === 'separator') {
+                html += `<th class="kwyk-variation-separator">${formatFractionHtml(escapeHtml(col.label))}</th>`;
+            } else if (col.type === 'boundary') {
+                html += `<th>${formatFractionHtml(escapeHtml(col.label))}</th>`;
+            } else {
+                html += '<th></th>';
+            }
+        });
+        html += '</tr>';
+
+        // Lignes f (3 sous-lignes : haut / flèche / bas)
+        rows.forEach(row => {
+            const vals = (row.values || []).map(String);
+            const fCols = [{ type: 'boundary' }];
+            for (const v of vals) {
+                fCols.push(v === '||' ? { type: 'separator' } : { type: 'arrow', arrow: v });
+            }
+            if (vals.length > 0 && vals[vals.length - 1] !== '||') {
+                fCols.push({ type: 'boundary' });
+            }
+
+            html += '<tr class="kwyk-variation-row-high">';
+            html += `<td class="kwyk-variation-label" rowspan="3">${escapeHtml(String(row.label))}</td>`;
+            fCols.forEach(col => {
+                if (col.type === 'separator') {
+                    html += '<td class="kwyk-variation-separator" rowspan="3"></td>';
+                } else {
+                    html += '<td class="kwyk-variation-empty"></td>';
+                }
+            });
+            html += '</tr>';
+
+            html += '<tr class="kwyk-variation-row-arrow">';
+            fCols.forEach(col => {
+                if (col.type === 'separator') return;
+                if (col.type === 'arrow') {
+                    const cls = col.arrow === '↗' ? 'arrow-up' : 'arrow-down';
+                    html += `<td class="kwyk-variation-arrow ${cls}">${escapeHtml(col.arrow)}</td>`;
+                } else {
+                    html += '<td class="kwyk-variation-empty"></td>';
+                }
+            });
+            html += '</tr>';
+
+            html += '<tr class="kwyk-variation-row-low">';
+            fCols.forEach(col => {
+                if (col.type === 'separator') return;
+                html += '<td class="kwyk-variation-empty"></td>';
             });
             html += '</tr>';
         });
@@ -2972,14 +3941,19 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
      * Position déduite : avant ↗ = bas, après ↗ = haut, avant ↘ = haut, après ↘ = bas.
      */
     function renderVariationTable(tableau) {
-        const headers = tableau.headers || [];
         const rows = tableau.rows || [];
+        const firstValues = rows.length > 0 ? (rows[0].values || []) : [];
+
+        // Format simple : uniquement des flèches et séparateurs (pas de valeurs numériques de f)
+        const isSimple = firstValues.length > 0 && firstValues.every(v => {
+            const s = String(v);
+            return s === '↗' || s === '↘' || s === '||';
+        });
+        if (isSimple) return renderSimpleVariationTable(tableau);
+
+        const headers = tableau.headers || [];
         // Bornes = headers sans le premier élément "x" (qui est le label de la ligne d'en-tête)
         const boundaries = headers.slice(1);
-
-        // Utiliser la première row pour construire les en-têtes expandés
-        // On insère un <th> vide pour chaque flèche dans values
-        const firstValues = rows.length > 0 ? (rows[0].values || []) : [];
 
         let html = '<div class="kwyk-variation-table-wrapper">';
         html += '<table class="kwyk-variation-table">';
@@ -2991,7 +3965,18 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
         let boundIdx = 0;
         for (let i = 0; i < firstValues.length; i++) {
             const val = String(firstValues[i]);
+            const nextVal = i + 1 < firstValues.length ? String(firstValues[i + 1]) : null;
+            const prevVal = i - 1 >= 0 ? String(firstValues[i - 1]) : null;
+
             if (val === '↗' || val === '↘') {
+                html += '<th></th>';
+            } else if (val === '||') {
+                // Le séparateur correspond à la borne exclue → lui attribuer la borne x
+                const label = boundIdx < boundaries.length ? boundaries[boundIdx] : '';
+                html += `<th class="kwyk-variation-separator" style="width:6px;padding:0;font-size:11px">${formatFractionHtml(escapeHtml(String(label)))}</th>`;
+                boundIdx++;
+            } else if (nextVal === '||' || prevVal === '||') {
+                // Valeur limite adjacente au séparateur → pas de borne x (c'est une limite, pas une borne)
                 html += '<th></th>';
             } else {
                 const label = boundIdx < boundaries.length ? boundaries[boundIdx] : '';
@@ -3011,6 +3996,8 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
                 const val = String(values[i]);
                 if (val === '↗' || val === '↘') {
                     positions.push('arrow');
+                } else if (val === '||') {
+                    positions.push('separator');
                 } else {
                     const nextVal = i + 1 < values.length ? String(values[i + 1]) : null;
                     const prevVal = i - 1 >= 0 ? String(values[i - 1]) : null;
@@ -3019,6 +4006,12 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
                         positions.push('low');
                     } else if (nextVal === '↘' || prevVal === '↗') {
                         positions.push('high');
+                    } else if (prevVal === '||') {
+                        // Valeur juste après une discontinuité → commence en haut
+                        positions.push('high');
+                    } else if (nextVal === '||') {
+                        // Valeur juste avant une discontinuité → finit en bas
+                        positions.push('low');
                     } else {
                         positions.push('high');
                     }
@@ -3029,7 +4022,9 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
             html += '<tr class="kwyk-variation-row-high">';
             html += `<td class="kwyk-variation-label" rowspan="3">${escapeHtml(String(row.label))}</td>`;
             for (let i = 0; i < values.length; i++) {
-                if (positions[i] === 'high') {
+                if (positions[i] === 'separator') {
+                    html += '<td class="kwyk-variation-separator" rowspan="3"></td>';
+                } else if (positions[i] === 'high') {
                     html += `<td class="kwyk-variation-val high">${escapeHtml(String(values[i]))}</td>`;
                 } else {
                     html += '<td class="kwyk-variation-empty"></td>';
@@ -3040,6 +4035,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
             // Sous-ligne flèche
             html += '<tr class="kwyk-variation-row-arrow">';
             for (let i = 0; i < values.length; i++) {
+                if (positions[i] === 'separator') continue; // rowspan déjà posé
                 const val = String(values[i]);
                 if (positions[i] === 'arrow') {
                     const arrowCls = val === '↗' ? 'arrow-up' : 'arrow-down';
@@ -3053,6 +4049,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
             // Sous-ligne basse
             html += '<tr class="kwyk-variation-row-low">';
             for (let i = 0; i < values.length; i++) {
+                if (positions[i] === 'separator') continue; // rowspan déjà posé
                 if (positions[i] === 'low') {
                     html += `<td class="kwyk-variation-val low">${escapeHtml(String(values[i]))}</td>`;
                 } else {
@@ -3070,7 +4067,7 @@ RAPPEL FORMAT: Fractions = (a)/(b), Racines = √ ou sqrt(), Puissances = x^2`;
     // AFFICHAGE
     // ===========================================
 
-    function showLoading(text = 'Reflexion...') {
+    function showLoading(text = 'Réflexion...') {
         const area = document.getElementById('kwyk-response');
         if (area) {
             area.innerHTML = `

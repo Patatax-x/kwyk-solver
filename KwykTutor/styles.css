@@ -1057,6 +1057,12 @@
   font-weight: 800;
 }
 
+.kwyk-sign-table-val.sign-empty {
+  background: transparent;
+  border-left: none;
+  border-right: none;
+}
+
 /* Dark mode tableau de signes */
 [data-theme="dark"] .kwyk-sign-table th,
 [data-theme="dark"] .kwyk-sign-table td {
@@ -1172,6 +1178,19 @@
 
 .kwyk-variation-empty {
   /* empty cells stay blank */
+}
+
+.kwyk-variation-separator {
+  border-left: 3px double #333 !important;
+  border-right: 3px double #333 !important;
+  width: 6px;
+  padding: 0;
+  background: transparent;
+}
+
+[data-theme="dark"] .kwyk-variation-separator {
+  border-left-color: #aaa !important;
+  border-right-color: #aaa !important;
 }
 
 /* Dark mode tableau de variations */

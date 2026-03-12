@@ -38,12 +38,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.mistralApiKey && result.mistralApiKey.length > 10) {
                 apiIndicator.classList.add('ok');
                 apiIndicator.classList.remove('error', 'warning');
-                apiStatus.textContent = 'Cle API configuree';
+                apiStatus.textContent = 'Clé API configurée';
                 apiWarning.classList.add('hidden');
             } else {
                 apiIndicator.classList.add('warning');
                 apiIndicator.classList.remove('ok', 'error');
-                apiStatus.textContent = 'Cle API non configuree';
+                apiStatus.textContent = 'Clé API non configurée';
                 apiWarning.classList.remove('hidden');
             }
 

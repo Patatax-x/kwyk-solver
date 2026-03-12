@@ -306,7 +306,24 @@
     <div class="container">
         <div class="header">
             <h1>Kwyk Tutor - Options</h1>
-            <p>Configure ton assistant pedagogique</p>
+            <p>Configure ton assistant pédagogique</p>
+        </div>
+
+        <!-- Profil utilisateur -->
+        <div class="card">
+            <h2>Profil</h2>
+
+            <div class="form-group">
+                <label for="user-pseudo">Pseudo</label>
+                <input type="text" id="user-pseudo" placeholder="Ton pseudo...">
+                <p class="hint" id="pseudo-hint">Ce pseudo est visible par l'administrateur.</p>
+            </div>
+
+            <div class="form-group">
+                <label>Identifiant unique</label>
+                <input type="text" id="user-id" readonly style="background: #f8f9fa; color: #6c757d; cursor: default;">
+                <p class="hint">Identifiant généré automatiquement. Non modifiable.</p>
+            </div>
         </div>
 
         <!-- Configuration API -->
@@ -314,29 +331,29 @@
             <h2>Configuration API Mistral</h2>
 
             <div class="info-box">
-                <h4>Comment obtenir une cle API ?</h4>
+                <h4>Comment obtenir une clé API ?</h4>
                 <ol>
                     <li>Va sur <a href="https://console.mistral.ai/" target="_blank">console.mistral.ai</a></li>
-                    <li>Cree un compte gratuit</li>
+                    <li>Crée un compte gratuit</li>
                     <li>Va dans "API Keys"</li>
-                    <li>Cree une nouvelle cle et copie-la ici</li>
+                    <li>Crée une nouvelle clé et copie-la ici</li>
                 </ol>
             </div>
 
             <div class="form-group">
-                <label for="api-key">Cle API Mistral</label>
+                <label for="api-key">Clé API Mistral</label>
                 <input type="password" id="api-key" placeholder="sk-xxxxxxxxxxxxxxxx">
-                <p class="hint">Ta cle reste stockee localement dans ton navigateur, jamais envoyee ailleurs.</p>
+                <p class="hint">Ta clé reste stockée localement dans ton navigateur, jamais envoyée ailleurs.</p>
             </div>
 
             <div class="form-group">
-                <label for="model">Modele</label>
+                <label for="model">Modèle</label>
                 <select id="model">
-                    <option value="mistral-small-latest">Mistral Small (rapide, economique)</option>
-                    <option value="mistral-medium-latest" selected>Mistral Medium (equilibre)</option>
-                    <option value="mistral-large-latest">Mistral Large (plus precis)</option>
+                    <option value="mistral-small-latest">Mistral Small (rapide, économique)</option>
+                    <option value="mistral-medium-latest" selected>Mistral Medium (équilibré)</option>
+                    <option value="mistral-large-latest">Mistral Large (plus précis)</option>
                 </select>
-                <p class="hint">Le modele Medium offre un bon equilibre entre qualite et rapidite.</p>
+                <p class="hint">Le modèle Medium offre un bon équilibre entre qualité et rapidité.</p>
             </div>
 
             <div class="test-section">
@@ -352,13 +369,13 @@
             <div class="mode-options">
                 <label class="mode-option" id="opt-pedagogique">
                     <input type="radio" name="mode" value="pedagogique" checked>
-                    <h4>Pedagogique</h4>
-                    <p>Donne la solution complete avec explications.</p>
+                    <h4>Pédagogique</h4>
+                    <p>Donne la solution complète avec explications.</p>
                 </label>
                 <label class="mode-option" id="opt-triche">
                     <input type="radio" name="mode" value="triche">
                     <h4>Triche</h4>
-                    <p>Remplit auto les reponses. A tes risques !</p>
+                    <p>Remplit auto les réponses. À tes risques !</p>
                 </label>
             </div>
         </div>
@@ -371,9 +388,9 @@
                 <label class="checkbox-label">
                     <input type="checkbox" id="cheat-auto-validate">
                     <span class="checkbox-custom"></span>
-                    <span class="checkbox-text">Auto-valider la reponse</span>
+                    <span class="checkbox-text">Auto-valider la réponse</span>
                 </label>
-                <p class="hint">Clique automatiquement sur "Valider" apres avoir rempli les champs.</p>
+                <p class="hint">Clique automatiquement sur "Valider" après avoir rempli les champs.</p>
             </div>
 
             <div class="form-group">
@@ -382,12 +399,12 @@
                     <span class="checkbox-custom"></span>
                     <span class="checkbox-text">Auto-cliquer sur Suivant</span>
                 </label>
-                <p class="hint">Clique automatiquement sur "Suivant" apres validation. Necessite l'auto-validation.</p>
+                <p class="hint">Clique automatiquement sur "Suivant" après validation. Nécessite l'auto-validation.</p>
             </div>
 
             <div class="info-box" style="background: #fff3e0;">
                 <h4 style="color: #e65100;">Attention</h4>
-                <p style="color: #f57c00;">Ces options automatisent completement le processus. Utilise-les avec precaution !</p>
+                <p style="color: #f57c00;">Ces options automatisent complètement le processus. Utilise-les avec précaution !</p>
             </div>
         </div>
 
@@ -395,7 +412,7 @@
         <div class="card">
             <div class="actions">
                 <button class="btn btn-primary" id="btn-save">Sauvegarder</button>
-                <button class="btn btn-secondary" id="btn-reset">Reinitialiser</button>
+                <button class="btn btn-secondary" id="btn-reset">Réinitialiser</button>
             </div>
         </div>
     </div>

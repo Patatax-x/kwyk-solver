@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kwyk Tutor",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "description": "Assistant pedagogique pour les exercices de maths sur Kwyk.fr",
   "author": "Patatax",
 
@@ -14,7 +14,8 @@
     "https://www.kwyk.fr/*",
     "https://api.mistral.ai/*",
     "https://gist.githubusercontent.com/*",
-    "https://raw.githubusercontent.com/*"
+    "https://raw.githubusercontent.com/*",
+    "https://api.github.com/*"
   ],
 
   "content_scripts": [

@@ -1,4 +1,4 @@
-// Service worker minimal pour Kwyk Tutor V13
+// Service worker minimal pour Kwyk Tutor V15
 // Gère le rechargement automatique après mise à jour
 
 chrome.runtime.onMessage.addListener((message, sender) => {
