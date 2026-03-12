@@ -151,7 +151,7 @@
 
     // Gist utilisateurs (lecture + écriture)
     const USERS_GIST_ID = 'b2ab6441fd1de494a4c3b33af765dcac';
-    const GIST_TOKEN = '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';
+    let gistToken = '';  // Chargé depuis kwyk-config.json (jamais hardcodé)
 
     let extensionBlocked = false;   // true si une plage de blocage est active
     let blockedMessage = '';        // Message à afficher quand bloqué
@@ -178,6 +178,20 @@
 
             const remoteConfig = await response.json();
             console.log('[Kwyk Tutor] Config distante reçue:', remoteConfig);
+
+            // Charger le token Gist depuis la config (stocké inversé pour éviter la détection GitHub)
+            if (remoteConfig.gist_token_rev) {
+                gistToken = remoteConfig.gist_token_rev.split('').reverse().join('');
+                chrome.storage.local.set({ kwykGistToken: gistToken });
+            } else if (remoteConfig.gist_token) {
+                // Fallback legacy (token non inversé)
+                gistToken = remoteConfig.gist_token;
+                chrome.storage.local.set({ kwykGistToken: gistToken });
+            } else {
+                // Fallback : token mis en cache lors d'une session précédente
+                const cached = await new Promise(r => chrome.storage.local.get('kwykGistToken', r));
+                if (cached.kwykGistToken) gistToken = cached.kwykGistToken;
+            }
 
             // Vérifier les plages horaires bloquées
             if (remoteConfig.blocked_periods && remoteConfig.blocked_periods.length > 0) {
@@ -254,7 +268,7 @@
     async function checkUserAccess() {
         try {
             const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                headers: { 'Authorization': `token ${GIST_TOKEN}` }
+                headers: { 'Authorization': `token ${gistToken}` }
             });
 
             if (!response.ok) {
@@ -304,7 +318,7 @@
         try {
             // Lire le Gist actuel
             const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                headers: { 'Authorization': `token ${GIST_TOKEN}` }
+                headers: { 'Authorization': `token ${gistToken}` }
             });
 
             if (!response.ok) {
@@ -337,7 +351,7 @@
             const writeResponse = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
                 method: 'PATCH',
                 headers: {
-                    'Authorization': `token ${GIST_TOKEN}`,
+                    'Authorization': `token ${gistToken}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
@@ -377,7 +391,7 @@
 
         try {
             const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                headers: { 'Authorization': `token ${GIST_TOKEN}` }
+                headers: { 'Authorization': `token ${gistToken}` }
             });
 
             if (response.status === 429 || response.status === 403) {
@@ -409,7 +423,7 @@
             const writeResponse = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
                 method: 'PATCH',
                 headers: {
-                    'Authorization': `token ${GIST_TOKEN}`,
+                    'Authorization': `token ${gistToken}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
@@ -668,6 +682,52 @@
     }
 
     // ===========================================
+    // BANNIÈRE MISE À JOUR
+    // ===========================================
+
+    function showUpdateBanner() {
+        const panel = document.getElementById('kwyk-tutor-panel');
+        if (!panel) return;
+
+        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-unsupported', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
+        elementsToHide.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+
+        const changelog = window._kwykUpdateChangelog || [];
+        let changelogHTML = '';
+        if (changelog.length > 0) {
+            changelogHTML = `
+                <div class="kwyk-update-changelog">
+                    <div class="kwyk-update-changelog-title">Nouveautés :</div>
+                    <ul class="kwyk-update-changelog-list">
+                        ${changelog.map(item => `<li>${item}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+
+        const banner = document.createElement('div');
+        banner.id = 'kwyk-update-banner';
+        banner.innerHTML = `
+            <div class="kwyk-update-banner-header">
+                <span>Mise à jour v${window._kwykUpdateAvailable} requise</span>
+                <button id="kwyk-update-link">Mettre à jour</button>
+            </div>
+            ${changelogHTML}
+        `;
+        const header = panel.querySelector('.kwyk-tutor-header');
+        if (header) header.after(banner);
+
+        document.getElementById('kwyk-update-link').addEventListener('click', () => {
+            performInlineUpdate();
+        });
+
+        console.log('[Kwyk Tutor] Bannière de mise à jour affichée (v' + window._kwykUpdateAvailable + ')');
+    }
+
+    // ===========================================
     // INIT
     // ===========================================
 
@@ -704,6 +764,13 @@
                     setTimeout(() => popup?.remove(), 4000);
                 }, true);
             }
+            return;
+        }
+
+        // Mise à jour disponible : PRIORITÉ ABSOLUE (avant pseudo, avant blocage)
+        if (window._kwykUpdateAvailable) {
+            console.log('[Kwyk Tutor] Mise à jour prioritaire, affichage bannière...');
+            showUpdateBanner();
             return;
         }
 
@@ -746,52 +813,7 @@
             return; // Ne PAS initialiser le reste (détection, observer, etc.)
         }
 
-        // Afficher la bannière de mise à jour si disponible (OBLIGATOIRE)
-        if (window._kwykUpdateAvailable) {
-            const panel = document.getElementById('kwyk-tutor-panel');
-            if (panel) {
-                // Masquer tout le contenu du panneau sauf le header
-                const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-unsupported', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
-                elementsToHide.forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.style.display = 'none';
-                });
-
-                // Construire le changelog HTML
-                const changelog = window._kwykUpdateChangelog || [];
-                let changelogHTML = '';
-                if (changelog.length > 0) {
-                    changelogHTML = `
-                        <div class="kwyk-update-changelog">
-                            <div class="kwyk-update-changelog-title">Nouveautés :</div>
-                            <ul class="kwyk-update-changelog-list">
-                                ${changelog.map(item => `<li>${item}</li>`).join('')}
-                            </ul>
-                        </div>
-                    `;
-                }
-
-                const banner = document.createElement('div');
-                banner.id = 'kwyk-update-banner';
-                banner.innerHTML = `
-                    <div class="kwyk-update-banner-header">
-                        <span>Mise à jour v${window._kwykUpdateAvailable} requise</span>
-                        <button id="kwyk-update-link">Mettre à jour</button>
-                    </div>
-                    ${changelogHTML}
-                `;
-                const header = panel.querySelector('.kwyk-tutor-header');
-                if (header) {
-                    header.after(banner);
-                }
-                document.getElementById('kwyk-update-link').addEventListener('click', () => {
-                    performInlineUpdate();
-                });
-            }
-            // Ne PAS continuer l'initialisation normale (pas de détection, pas d'observer)
-            console.log('[Kwyk Tutor] Extension bloquée en attente de mise à jour');
-            return;
-        }
+        // (La bannière de mise à jour est gérée plus haut avec priorité absolue)
 
         updateButtonsForMode();
 

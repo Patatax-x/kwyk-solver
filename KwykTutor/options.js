@@ -5,9 +5,13 @@
  */
 
 const USERS_GIST_ID = 'b2ab6441fd1de494a4c3b33af765dcac';
-const GIST_TOKEN = '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';
+let GIST_TOKEN = '';  // Chargé depuis chrome.storage.local (mis en cache par content.js)
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Charger le token Gist depuis le cache local
+    chrome.storage.local.get('kwykGistToken', (result) => {
+        if (result.kwykGistToken) GIST_TOKEN = result.kwykGistToken;
+    });
     // Elements DOM
     const apiKeyInput = document.getElementById('api-key');
     const modelSelect = document.getElementById('model');
