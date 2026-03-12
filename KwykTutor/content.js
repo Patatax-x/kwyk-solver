@@ -338,11 +338,13 @@
             }
 
             // Ajouter/mettre à jour l'utilisateur
+            // Les champs admin (enabled, locked) sont préservés via le spread — jamais écrasés par content.js
             const existing = usersData[userId] || {};
             usersData[userId] = {
+                enabled: true,   // défaut pour nouvel utilisateur
+                locked: false,   // défaut pour nouvel utilisateur
+                ...existing,     // préserve les champs admin (enabled, locked) pour les utilisateurs existants
                 name: pseudo,
-                enabled: existing.enabled !== undefined ? existing.enabled : true,
-                locked: existing.locked || false,
                 lastSeen: new Date().toISOString(),
                 lastPing: new Date().toISOString()
             };
@@ -2989,6 +2991,7 @@ RÈGLES JSON:
 FORMATAGE MATHÉMATIQUE:
 - Fractions: TOUJOURS (numérateur)/(dénominateur) avec parenthèses. Correct: (1)/(3), (x+1)/(x-2). INCORRECT: 1/3, x+1/x-2
 - Racines: √ ou sqrt(). JAMAIS "racine carrée de"
+- Racines TOUJOURS SIMPLIFIÉES: extraire les facteurs parfaits. √28 = 2√7, √12 = 2√3, √45 = 3√5, √50 = 5√2. Ne JAMAIS laisser un entier non simplifié sous le radical si un facteur carré peut être sorti.
 - Puissances: x^2 pour x²
 - Multiplication: JAMAIS de *. Écrire 3x, PAS 3*x
 - Domaines ensemble: ℝ{4} (si l'énoncé demande un ensemble)
