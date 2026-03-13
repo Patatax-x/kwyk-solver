@@ -59,11 +59,17 @@
                     return;
                 }
 
-                // V12: Utiliser write() au lieu de latex() pour préserver le format exact
-                // latex() convertit \mathbb{R} en ℝ (Unicode) → Kwyk compte faux
-                // write() garde \mathbb{R} tel quel → Kwyk accepte
+                // Stratégie d'insertion selon le contenu :
+                // - latex() setter : parse l'expression entière d'un coup → pas de problème
+                //   curseur-dans-fraction (évite que ;+∞[ atterrisse dans un dénominateur)
+                // - write() : nécessaire uniquement pour \mathbb{R}, car latex() le convertit
+                //   en ℝ Unicode que Kwyk ne reconnaît pas
                 mathField.latex(''); // Effacer le champ d'abord
-                mathField.write(latex); // Insérer avec write() qui préserve le LaTeX
+                if (latex.includes('\\mathbb')) {
+                    mathField.write(latex); // Préserve \mathbb{R}
+                } else {
+                    mathField.latex(latex); // Plus robuste pour fractions dans intervalles
+                }
 
                 console.log('[Kwyk Tutor Inject] LaTeX inséré avec write() (index', fieldIndex + '):', latex);
                 console.log('[Kwyk Tutor Inject] Vérification stockage:', mathField.latex());

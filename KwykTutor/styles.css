@@ -373,35 +373,6 @@
 }
 
 /* Avertissement exercice non supporté */
-.kwyk-unsupported-warning {
-  background: #fdecea;
-  border: 1px solid #f5c6cb;
-  border-radius: 8px;
-  padding: 12px;
-  margin: 8px 12px;
-  text-align: center;
-}
-
-.kwyk-unsupported-warning strong {
-  display: block;
-  color: #c62828;
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-
-.kwyk-unsupported-warning p {
-  color: #b71c1c;
-  font-size: 12px;
-  margin: 0;
-  line-height: 1.4;
-}
-
-.kwyk-unsupported-joke {
-  margin-top: 8px !important;
-  font-style: italic;
-  color: #666 !important;
-  font-size: 11px !important;
-}
 
 /* Zone de réponse */
 .kwyk-response-area {

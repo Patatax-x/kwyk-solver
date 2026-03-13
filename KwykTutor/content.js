@@ -159,6 +159,7 @@
     let userPseudo = '';            // Pseudo de l'utilisateur
     let userId = '';                // UUID de l'utilisateur
     let userPseudoLocked = false;   // true si le pseudo est verrouillé par l'admin
+    let remoteConfig = {};          // V16: Config distante (incluant blocked_exercises)
 
     /**
      * Vérifie la config distante (Gist) pour bloquer l'extension pendant les contrôles
@@ -176,7 +177,7 @@
                 return;
             }
 
-            const remoteConfig = await response.json();
+            remoteConfig = await response.json();
             console.log('[Kwyk Tutor] Config distante reçue:', remoteConfig);
 
             // Charger le token Gist depuis la config (stocké inversé pour éviter la détection GitHub)
@@ -452,14 +453,21 @@
     }
 
     /**
-     * Démarre le heartbeat toutes les 60 secondes
+     * Démarre le heartbeat toutes les 3 minutes avec jitter aléatoire
+     * (évite que tous les utilisateurs pinguent simultanément → secondary rate limit GitHub)
      */
     let heartbeatInterval = null;
+    const HEARTBEAT_BASE = 180000; // 3 minutes de base
+    const HEARTBEAT_JITTER = 60000; // ±1 minute aléatoire
 
     function startHeartbeat() {
         if (heartbeatInterval) clearInterval(heartbeatInterval);
-        sendHeartbeat();
-        heartbeatInterval = setInterval(sendHeartbeat, 60000);
+        // Premier heartbeat après un délai aléatoire (0-60s) pour étaler les pings
+        const initialDelay = Math.floor(Math.random() * 60000);
+        setTimeout(() => {
+            sendHeartbeat();
+            heartbeatInterval = setInterval(sendHeartbeat, HEARTBEAT_BASE + Math.floor(Math.random() * HEARTBEAT_JITTER));
+        }, initialDelay);
     }
 
     /**
@@ -470,7 +478,7 @@
         if (!panel) return;
 
         // Masquer tout le contenu sauf le header
-        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-unsupported', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
+        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
         elementsToHide.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
@@ -521,7 +529,7 @@
             const success = await registerUser(pseudo);
             if (success) {
                 pseudoForm.remove();
-                // Réafficher seulement les éléments normaux (pas kwyk-unsupported)
+                // Réafficher seulement les éléments normaux
                 ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'].forEach(id => {
                     const el = document.getElementById(id);
                     if (el) el.style.display = '';
@@ -554,6 +562,7 @@
                     if (changes.mode) {
                         config.mode = changes.mode.newValue;
                         updateButtonsForMode();
+                        checkUnsupportedExercise();
                     }
                     if (changes.cheatAutoValidate !== undefined) {
                         config.cheatAutoValidate = changes.cheatAutoValidate.newValue;
@@ -691,7 +700,7 @@
         const panel = document.getElementById('kwyk-tutor-panel');
         if (!panel) return;
 
-        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-unsupported', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
+        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
         elementsToHide.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
@@ -833,6 +842,7 @@
                     if (changes.mode) {
                         config.mode = changes.mode.newValue;
                         updateButtonsForMode();
+                        checkUnsupportedExercise();
                         console.log('[Kwyk Tutor] Mode changé en temps réel:', config.mode);
                     }
                     if (changes.cheatAutoValidate !== undefined) {
@@ -961,20 +971,10 @@
                 }
             }
 
-            // Si mode triche actif, remplir automatiquement le nouvel exercice
-            // v24: Vérifier d'abord si l'exercice est supporté AVANT de lancer l'IA
+            // Si mode triche actif, tenter la résolution auto
+            // executeCheatMode vérifie lui-même si l'exercice est bloqué/non supporté
             if (config.mode === 'triche' && cheatModeActive) {
-                // Vérifier si exercice supporté avant de lancer la résolution
-                if (checkUnsupportedExercise(true)) {
-                    console.log('[Kwyk Tutor] Exercice non supporté, pas de résolution auto');
-                    if (!(config.cheatAutoValidate && config.cheatAutoNext)) {
-                        updateCheatStatus('Exercice non supporté', 'error');
-                    }
-                } else {
-                    console.log('[Kwyk Tutor] Mode triche: résolution automatique du nouvel exercice');
-                    updateCheatStatus('Résolution...', 'loading');
-                    setTimeout(() => executeCheatMode(), 100);
-                }
+                setTimeout(() => executeCheatMode(), 100);
             }
         }
     }
@@ -1086,11 +1086,6 @@
             </div>
             <div class="kwyk-question-nav" id="kwyk-question-nav" style="display:none;"></div>
             <div class="kwyk-status" id="kwyk-status"></div>
-            <div class="kwyk-unsupported-warning" id="kwyk-unsupported" style="display:none;">
-                <strong>Exercice non supporté</strong>
-                <p>Ce type d'exercice ne peut pas être résolu automatiquement.</p>
-                <p class="kwyk-unsupported-joke">T'avais qu'à écouter en cours ! ;)</p>
-            </div>
             <div class="kwyk-action-buttons" id="kwyk-actions">
                 <button class="kwyk-action-btn primary" id="btn-explain">Explique</button>
                 <button class="kwyk-action-btn secondary" id="btn-hint">Indice</button>
@@ -1179,6 +1174,10 @@
 
     /**
      * Met à jour le status du mode triche
+     * - type: 'loading' | 'success' | 'error' | ''
+     * - Spinner animé en mode loading
+     * - Ouvre le panneau automatiquement si fermé (loading/error)
+     * - Toast de notification si panneau fermé (success/error)
      */
     function updateCheatStatus(text, type = '') {
         const statusEl = document.getElementById('kwyk-cheat-status');
@@ -1186,7 +1185,39 @@
 
         statusEl.className = 'kwyk-cheat-status';
         if (type) statusEl.classList.add(`status-${type}`);
-        statusEl.textContent = text;
+
+        if (type === 'loading') {
+            statusEl.innerHTML = `<span class="kwyk-spinner"></span><span>${escapeHtml(text)}</span>`;
+        } else {
+            statusEl.textContent = text;
+        }
+
+        // Ouvre le panneau automatiquement si fermé et état important
+        const panel = document.getElementById('kwyk-tutor-panel');
+        if (panel && !panel.classList.contains('open') && (type === 'error' || type === 'loading')) {
+            panel.classList.add('open');
+        }
+
+        // Toast si panneau fermé pour succès et erreur
+        if (panel && !panel.classList.contains('open') && (type === 'success' || type === 'error')) {
+            showCheatToast(text, type);
+        }
+    }
+
+    /**
+     * Toast de notification temporaire hors panneau
+     */
+    function showCheatToast(text, type) {
+        document.getElementById('kwyk-toast')?.remove();
+        const toast = document.createElement('div');
+        toast.id = 'kwyk-toast';
+        toast.style.background = type === 'success' ? '#2e7d32' : '#c62828';
+        toast.innerHTML = `${type === 'success' ? '✓' : '✕'} ${escapeHtml(text)}`;
+        document.body.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 400);
+        }, 3000);
     }
 
     /**
@@ -1206,7 +1237,7 @@
                 return;
             }
 
-            updateCheatStatus('Résolution en cours...', 'loading');
+            updateCheatStatus('Appel IA en cours...', 'loading');
 
             // Lancer le remplissage automatique
             await executeCheatMode();
@@ -1264,32 +1295,22 @@
         const myExecutionId = cheatExecutionId;
         console.log('[Kwyk Tutor] executeCheatMode démarré (ID:', myExecutionId, ')');
 
+        // Vérifier EN TOUT PREMIER si bloqué/non supporté — avant même d'acquérir le verrou
+        if (!currentExercise || currentExercise.questions.length === 0) {
+            updateCheatStatus('Aucun exercice détecté', 'error');
+            return;
+        }
+        if (checkUnsupportedExercise(true)) {
+            console.log('[Kwyk Tutor] Exercice bloqué/non supporté, abandon avant verrou');
+            return;
+        }
+
         // Vérifier si une autre exécution est en cours
         if (cheatModeRunning) {
             console.log('[Kwyk Tutor] ⏳ Mode triche déjà en cours, abandon');
             return;
         }
         cheatModeRunning = true;
-
-        if (!currentExercise || currentExercise.questions.length === 0) {
-            updateCheatStatus('Aucun exercice détecté', 'error');
-            cheatModeRunning = false;
-            return;
-        }
-
-        // Vérifier si exercice non supporté (avec auto-skip si les options sont activées)
-        if (checkUnsupportedExercise(true)) {
-            // Si auto-skip est activé, la fonction gère tout
-            // Sinon, on désactive le mode triche
-            if (!(config.cheatAutoValidate && config.cheatAutoNext)) {
-                updateCheatStatus('Exercice non supporté', 'error');
-                const switchEl = document.getElementById('kwyk-cheat-switch');
-                if (switchEl) switchEl.checked = false;
-                cheatModeActive = false;
-            }
-            cheatModeRunning = false; // Libérer le verrou
-            return;
-        }
 
         // V15: Bloquer le mode triche pour les tableaux (signes, variations, valeurs)
         const exerciseType = currentExercise?.exerciseType;
@@ -1376,6 +1397,7 @@
             }
 
             // Remplir TOUTES les questions d'un coup
+            updateCheatStatus('Remplissage des réponses...', 'loading');
             const numQuestions = currentExercise.questions.length;
             const success = await autoFillAllQuestions();
 
@@ -2229,8 +2251,90 @@
      * v22: Ajout auto-skip si mode triche actif avec auto-next
      * @param {boolean} autoSkip - Si true, skip automatiquement au suivant
      */
+    /**
+     * V16: Extrait l'ID de l'exercice depuis l'URL
+     * Format Kwyk: /devoirs/781733/?id=35850955
+     * @returns {number|null} L'ID de l'exercice ou null si non trouvé
+     */
+    function extractExerciseIdFromUrl() {
+        // Extraire depuis le lien actif de navigation: <a class="active" href="?id=XXXXX">
+        const activeLink = document.querySelector('a.active[href^="?id="]');
+        if (activeLink) {
+            const match = activeLink.getAttribute('href').match(/\?id=(\d+)/);
+            if (match) {
+                const id = parseInt(match[1], 10);
+                console.log(`[Kwyk Tutor] ID exercice extrait (DOM actif): ${id}`);
+                return id;
+            }
+        }
+
+        // Fallback: URL query parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const idParam = urlParams.get('id');
+        if (idParam) {
+            const id = parseInt(idParam, 10);
+            if (!isNaN(id)) {
+                console.log(`[Kwyk Tutor] ID exercice extrait (URL): ${id}`);
+                return id;
+            }
+        }
+
+        return null;
+    }
+
     function checkUnsupportedExercise(autoSkip = false) {
         if (!currentExercise) return false;
+
+        const warningEl = null; // supprimé
+        const actionsEl = document.getElementById('kwyk-actions');
+        const responseEl = document.getElementById('kwyk-response');
+        const cheatSection = document.getElementById('kwyk-cheat-section');
+
+        // V16: Vérifier si l'exercice est bloqué par ID via admin
+        const exerciseId = extractExerciseIdFromUrl();
+        const blockedEntry = exerciseId && remoteConfig.blocked_exercises &&
+            remoteConfig.blocked_exercises.find(e => (typeof e === 'object' ? e.id : e) === exerciseId);
+        const currentMode = (config.mode === 'triche' && cheatModeActive) ? 'triche' : 'pedagogique';
+        const isExerciseBlocked = blockedEntry && (
+            typeof blockedEntry === 'number' ||
+            blockedEntry.mode === 'both' ||
+            blockedEntry.mode === currentMode
+        );
+        if (isExerciseBlocked) {
+            console.log(`[Kwyk Tutor] Exercice bloqué par admin (ID: ${exerciseId}, mode: ${currentMode})`);
+
+            const blockedMode = typeof blockedEntry === 'object' ? blockedEntry.mode : 'both';
+            const blockedMsg = blockedMode === 'both'
+                ? '🚫 Exercice bloqué !'
+                : blockedMode === 'triche'
+                    ? '🚫 Exercice bloqué en mode triche. Passe en mode pédagogique !'
+                    : '🚫 Exercice bloqué en mode pédagogique. Passe en mode triche !';
+
+            if (config.mode === 'triche') {
+                // Mode triche : garder la section visible, afficher le message dans le status
+                if (actionsEl) actionsEl.style.display = 'none';
+                if (responseEl) responseEl.style.display = 'none';
+                if (cheatSection) cheatSection.style.display = 'block';
+
+                const switchEl = document.getElementById('kwyk-cheat-switch');
+                if (switchEl) {
+                    switchEl.checked = false;
+                    switchEl.disabled = true;
+                }
+                cheatModeActive = false;
+                updateCheatStatus(blockedMsg, 'error');
+            } else {
+                // Mode pédagogique : afficher le message dans la zone de réponse
+                if (actionsEl) actionsEl.style.display = 'none';
+                if (cheatSection) cheatSection.style.display = 'none';
+                if (responseEl) {
+                    responseEl.style.display = 'block';
+                    responseEl.innerHTML = `<div class="kwyk-bubble error">${blockedMsg}</div>`;
+                }
+            }
+
+            return true;
+        }
 
         // V14: Tableaux de valeurs/variation/signes maintenant supportés
         // Seuls les exercices graphiques et drag&drop restent non supportés
@@ -2242,10 +2346,6 @@
         ];
 
         const exerciseText = currentExercise.texte.toLowerCase();
-        const warningEl = document.getElementById('kwyk-unsupported');
-        const actionsEl = document.getElementById('kwyk-actions');
-        const responseEl = document.getElementById('kwyk-response');
-        const cheatSection = document.getElementById('kwyk-cheat-section');
 
         for (const keyword of unsupportedKeywords) {
             if (exerciseText.includes(keyword)) {
@@ -2271,15 +2371,13 @@
                     return true;
                 }
 
-                if (warningEl) {
-                    warningEl.style.display = 'block';
-                    warningEl.querySelector('p:first-of-type').textContent =
-                        `Ce type d'exercice (${keyword}) ne peut pas être résolu automatiquement.`;
-                }
                 // Masquer TOUS les contrôles (boutons ET switch triche)
-                if (actionsEl) actionsEl.style.display = 'none';
-                if (responseEl) responseEl.style.display = 'none';
+                        if (actionsEl) actionsEl.style.display = 'none';
                 if (cheatSection) cheatSection.style.display = 'none';
+                if (responseEl) {
+                    responseEl.style.display = 'block';
+                    responseEl.innerHTML = '<div class="kwyk-bubble error">⚠️ Exercice non supporté</div>';
+                }
 
                 // v24: Désactiver ET bloquer le switch triche pour exercices non supportés
                 console.log('[Kwyk Tutor] Désactivation du mode triche (exercice non supporté)');
@@ -2296,7 +2394,6 @@
         }
 
         // Exercice supporté - respecter le mode actuel
-        if (warningEl) warningEl.style.display = 'none';
 
         // v24: Réactiver le switch triche pour exercices supportés
         const switchEl = document.getElementById('kwyk-cheat-switch');
@@ -2487,15 +2584,12 @@
         // v24: Vérifier d'abord si l'exercice est supporté AVANT de lancer l'IA
         if (pendingCheatMode && cheatModeActive) {
             pendingCheatMode = false;
-            // Vérifier si exercice supporté avant de lancer la résolution
+            // Vérifier si exercice bloqué ou non supporté avant de lancer l'IA
             if (checkUnsupportedExercise(true)) {
-                console.log('[Kwyk Tutor] Exercice non supporté, pas de résolution auto');
-                if (!(config.cheatAutoValidate && config.cheatAutoNext)) {
-                    updateCheatStatus('Exercice non supporté', 'error');
-                }
+                console.log('[Kwyk Tutor] Exercice bloqué/non supporté, pas de résolution auto');
             } else {
                 console.log('[Kwyk Tutor] Mode triche en attente, lancement...');
-                updateCheatStatus('Résolution...', 'loading');
+                updateCheatStatus('Appel IA en cours...', 'loading');
                 setTimeout(() => executeCheatMode(), 100);
             }
         }
