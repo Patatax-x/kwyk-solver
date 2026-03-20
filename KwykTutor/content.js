@@ -3268,6 +3268,14 @@ Réponds avec ce JSON exact:
 
 S'il y a plusieurs questions, ajoute un objet par question dans "reponses" avec le bon numéro.
 
+RÈGLES CRITIQUES — Résolution d'inéquations avec produit de facteurs:
+- Pour résoudre ax+b=0 avec a négatif : déplacer b de l'autre côté (changer le signe), puis diviser par a.
+  Ex: -9x-6=0 → -9x=6 → x=6/(-9)=-2/3. JAMAIS (-6)/(-9)=+2/3.
+- VÉRIFIER chaque racine par substitution avant de l'utiliser : f(racine) doit valoir 0.
+  Ex: -9×(-2/3)-6 = 6-6 = 0 ✓
+- Avant de placer les racines dans le tableau, TOUJOURS les comparer numériquement et les placer de gauche à droite.
+  Ex: x=-5/9≈-0.556 et x=-2/3≈-0.667 → ordre correct: -2/3 puis -5/9 (car -0.667 < -0.556)
+
 EXEMPLE — Énoncé: "Résoudre 2x + 6 = 0"
 Réponse:
 {"regle": "Pour résoudre ax + b = 0 : soustraire b des deux membres, puis diviser par a", "exemple": {"enonce": "Résoudre 3x - 9 = 0", "etapes": ["3x - 9 = 0", "3x = 9  (on ajoute 9 des deux membres)", "x = (9)/(3)  (on divise par 3)", "x = 3"]}, "etapes": ["2x + 6 = 0", "2x = -6  (on soustrait 6 des deux membres)", "x = (-6)/(2)  (on divise par 2)", "x = -3"], "reponses": [{"question": 1, "type": "input", "reponse": "-3"}]}`,
