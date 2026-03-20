@@ -1127,9 +1127,9 @@
         }
 
         try {
-            return processNode(mathElement).trim();
+            return processNode(mathElement).trim().replace(/−/g, '-').replace(/×/g, '*');
         } catch (e) {
-            return mathElement.textContent || '';
+            return (mathElement.textContent || '').replace(/−/g, '-').replace(/×/g, '*');
         }
     }
 
@@ -1903,6 +1903,16 @@
     function convertToLatex(value) {
         if (!value) return value;
 
+        // Ensemble solution : {contenu} → \left\{contenu\right\}
+        // Doit être EN PREMIER avant les conversions de fractions qui introduisent des {} imbriquées
+        // Ex: {(-5)/(4)} → \left\{\frac{-5}{4}\right\}  (pas {\frac{-5}{4}} qui est un groupement invisible)
+        const ensembleMatch = value.match(/^\{(.+)\}$/);
+        if (ensembleMatch) {
+            const innerConverted = convertToLatex(ensembleMatch[1]);
+            console.log('[Kwyk Tutor] Conversion LaTeX:', value, '->', `\\left\\{${innerConverted}\\right\\}`);
+            return `\\left\\{${innerConverted}\\right\\}`;
+        }
+
         let latex = value;
 
         // Convertir les crochets [...] en parenthèses (...) SEULEMENT dans les fractions
@@ -1980,10 +1990,11 @@
         // IMPORTANT: Doit être APRÈS la conversion ℝ{...} pour ne pas interférer
         latex = latex.replace(/ℝ/g, '\\mathbb{R}');
 
-        // Ensemble solution : {1, 2} → \{1, 2\}
-        // MathQuill traite {x} comme groupement LaTeX invisible — il faut \{x\} pour afficher les accolades
-        // Seulement quand toute la valeur est enveloppée dans {}, sans accolades imbriquées
-        latex = latex.replace(/^\{([^{}]+)\}$/, '\\{$1\\}');
+        // Symboles Unicode → LaTeX (MathQuill stocke en LaTeX, Kwyk valide en LaTeX)
+        latex = latex.replace(/∞/g, '\\infty');
+        latex = latex.replace(/∪/g, '\\cup');
+
+        // Note: la conversion {contenu} → \left\{contenu\right\} est gérée en début de fonction
 
         console.log('[Kwyk Tutor] Conversion LaTeX:', value, '->', latex);
         return latex;
@@ -3279,7 +3290,8 @@ RÈGLES STRICTES DE FORMATAGE (appliquées à TOUS les champs):
 RÈGLE STRICTE POUR "reponse" dans "reponses":
 - Contient UNIQUEMENT la valeur finale, JAMAIS d'explication ni d'étape intermédiaire
 - Exemples corrects: "42", "(3)/(5)", "A", "√7", "x^2 + 3"
-- Exemples INCORRECTS: "La réponse est 42", "8*x", une étape intermédiaire`;
+- Exemples INCORRECTS: "La réponse est 42", "8*x", une étape intermédiaire
+- Si plusieurs solutions séparées par ";": les trier du plus petit au plus grand. Ex: "(-3)/(7);6" → CORRECT car (-3/7) < 6. Ex: "6;(-3)/(7)" → INCORRECT`;
     }
 
     /**
