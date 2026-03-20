@@ -214,17 +214,15 @@
 
 
             // Vérifier la version (seulement si update_enabled est actif)
+            // On compare LOCAL_VERSION (dans le code chargé) avec la version distante.
+            // Si les fichiers sont bien rechargés après mise à jour, LOCAL_VERSION sera correct.
             if (remoteConfig.update_enabled !== false && remoteConfig.version && remoteConfig.version !== LOCAL_VERSION) {
-                // Vérifier si l'utilisateur a déjà fait cette mise à jour
-                const stored = await new Promise(r => chrome.storage.local.get('kwykLastUpdate', r));
-                if (stored.kwykLastUpdate === remoteConfig.version) {
-                    console.log('[Kwyk Tutor] ✓ Déjà à jour (v' + remoteConfig.version + ' installée)');
-                } else {
-                    console.log('[Kwyk Tutor] ℹ️ Mise à jour disponible:', remoteConfig.version);
-                    window._kwykUpdateAvailable = remoteConfig.version;
-                    window._kwykUpdateConfig = remoteConfig;
-                    window._kwykUpdateChangelog = remoteConfig.changelog || [];
-                }
+                console.log(`[Kwyk Tutor] ℹ️ Mise à jour disponible: ${remoteConfig.version} (local: ${LOCAL_VERSION})`);
+                window._kwykUpdateAvailable = remoteConfig.version;
+                window._kwykUpdateConfig = remoteConfig;
+                window._kwykUpdateChangelog = remoteConfig.changelog || [];
+            } else {
+                console.log(`[Kwyk Tutor] ✓ Version à jour: ${LOCAL_VERSION}`);
             }
 
             console.log('[Kwyk Tutor] ✓ Aucun blocage actif');
@@ -382,94 +380,6 @@
         }
     }
 
-    /**
-     * Envoie un heartbeat (met à jour lastPing dans le Gist)
-     * Utilise un verrou pour éviter les race conditions
-     */
-    let heartbeatInProgress = false;
-    let heartbeatRateLimited = false;
-
-    async function sendHeartbeat() {
-        if (heartbeatInProgress || heartbeatRateLimited) return;
-        heartbeatInProgress = true;
-
-        try {
-            const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                headers: { 'Authorization': `token ${gistToken}` }
-            });
-
-            if (response.status === 429 || response.status === 403) {
-                console.warn(`[Kwyk Tutor] Rate limit GitHub (${response.status}), heartbeat suspendu 5 min`);
-                heartbeatRateLimited = true;
-                setTimeout(() => { heartbeatRateLimited = false; }, 300000);
-                return;
-            }
-            if (!response.ok) {
-                console.error(`[Kwyk Tutor] Erreur heartbeat GET: ${response.status}`);
-                return;
-            }
-
-            const gist = await response.json();
-            const file = gist.files['kwyk-users.json'];
-            if (!file) return;
-
-            let usersData;
-            try {
-                usersData = JSON.parse(file.content);
-            } catch (e) {
-                console.error('[Kwyk Tutor] JSON corrompu dans Gist users:', e);
-                return;
-            }
-            if (!usersData[userId]) return;
-
-            usersData[userId].lastPing = new Date().toISOString();
-
-            const writeResponse = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                method: 'PATCH',
-                headers: {
-                    'Authorization': `token ${gistToken}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    files: {
-                        'kwyk-users.json': {
-                            content: JSON.stringify(usersData, null, 2)
-                        }
-                    }
-                })
-            });
-
-            if (writeResponse.status === 429 || writeResponse.status === 403) {
-                console.warn(`[Kwyk Tutor] Rate limit GitHub PATCH (${writeResponse.status}), heartbeat suspendu 5 min`);
-                heartbeatRateLimited = true;
-                setTimeout(() => { heartbeatRateLimited = false; }, 300000);
-            } else if (!writeResponse.ok) {
-                console.error(`[Kwyk Tutor] Erreur heartbeat PATCH: ${writeResponse.status}`);
-            }
-        } catch (error) {
-            console.error('[Kwyk Tutor] Erreur heartbeat:', error);
-        } finally {
-            heartbeatInProgress = false;
-        }
-    }
-
-    /**
-     * Démarre le heartbeat toutes les 3 minutes avec jitter aléatoire
-     * (évite que tous les utilisateurs pinguent simultanément → secondary rate limit GitHub)
-     */
-    let heartbeatInterval = null;
-    const HEARTBEAT_BASE = 180000; // 3 minutes de base
-    const HEARTBEAT_JITTER = 60000; // ±1 minute aléatoire
-
-    function startHeartbeat() {
-        if (heartbeatInterval) clearInterval(heartbeatInterval);
-        // Premier heartbeat après un délai aléatoire (0-60s) pour étaler les pings
-        const initialDelay = Math.floor(Math.random() * 60000);
-        setTimeout(() => {
-            sendHeartbeat();
-            heartbeatInterval = setInterval(sendHeartbeat, HEARTBEAT_BASE + Math.floor(Math.random() * HEARTBEAT_JITTER));
-        }, initialDelay);
-    }
 
     /**
      * Affiche le formulaire de saisie du pseudo dans le panel
@@ -630,7 +540,6 @@
      * Continue l'initialisation après enregistrement du pseudo
      */
     function continueInit() {
-        startHeartbeat();
         updateButtonsForMode();
 
         setTimeout(() => {
@@ -763,10 +672,7 @@
 
             console.log(`[Kwyk Tutor] Mise à jour terminée: ${done}/${files.length} fichiers`);
 
-            // Sauvegarder la version installée (pour ne plus afficher la bannière)
-            chrome.storage.local.set({ kwykLastUpdate: config.version });
-
-            // Recharger l'extension + la page automatiquement
+            // Recharger l'extension — si les fichiers sont bien écrits, LOCAL_VERSION sera correct
             setTimeout(() => {
                 chrome.runtime.sendMessage({ action: 'reloadExtension' });
             }, 1500);
@@ -888,7 +794,6 @@
 
         // Mettre à jour lastSeen dans le Gist (sans bloquer)
         registerUser(userPseudo);
-        startHeartbeat();
 
         // Si bloqué : masquer le panneau et afficher le message au clic
         if (extensionBlocked) {
@@ -1242,9 +1147,11 @@
         if (!btn) return;
 
         if (btn.style.display === 'none') {
-            // Tout est caché → réafficher le bouton (panel reste fermé)
+            // Tout est caché → réafficher le bouton + ouvrir le panel + lancer expliquer
             btn.style.display = '';
-            console.log('[Kwyk Tutor] Bouton réaffiché');
+            if (panel) panel.classList.add('open');
+            handleAction('explain');
+            console.log('[Kwyk Tutor] Bouton réaffiché + panel ouvert + explain lancé');
         } else {
             // Tout est visible → fermer le panel ET cacher le bouton
             if (panel) panel.classList.remove('open');
