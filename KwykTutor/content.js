@@ -99,7 +99,8 @@
         cheatAutoValidate: false,
         cheatAutoNext: false,
         sounds: true,  // V12: Notifications sonores
-        theme: 'light' // V12: Thème (light/dark)
+        theme: 'light', // V12: Thème (light/dark)
+        panelSide: null  // 'left' ou 'right' — null = pas encore choisi
     };
 
     // V12: Notification sonore (beep)
@@ -529,18 +530,100 @@
             const success = await registerUser(pseudo);
             if (success) {
                 pseudoForm.remove();
-                // Réafficher seulement les éléments normaux
-                ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'].forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.style.display = '';
-                });
-                // Continuer l'init
-                continueInit();
+                // Afficher le choix du côté (puis continueInit)
+                showSidePrompt();
             } else {
                 submitBtn.textContent = 'Erreur, réessayer';
                 submitBtn.disabled = false;
             }
         });
+    }
+
+    /**
+     * Affiche le formulaire de choix du côté du panneau dans le panel
+     * Appelé après showPseudoPrompt() ou directement si pseudo déjà défini
+     */
+    function showSidePrompt() {
+        const panel = document.getElementById('kwyk-tutor-panel');
+        if (!panel) return;
+
+        // Ouvrir le panneau si fermé
+        panel.classList.add('open');
+
+        // Masquer tout le contenu sauf le header
+        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
+        elementsToHide.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+
+        let selectedSide = null;
+
+        const sideForm = document.createElement('div');
+        sideForm.id = 'kwyk-side-form';
+        sideForm.innerHTML = `
+            <div style="padding: 20px; text-align: center;">
+                <div style="font-size: 32px; margin-bottom: 12px;">📍</div>
+                <h3 style="margin-bottom: 8px; color: var(--kwyk-text, #212529);">Position du bouton</h3>
+                <p style="font-size: 13px; color: var(--kwyk-text-secondary, #6c757d); margin-bottom: 16px;">De quel côté veux-tu voir le bouton ?</p>
+                <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                    <button id="kwyk-side-left-btn" style="
+                        flex: 1; padding: 14px 10px; border: 2px solid #e9ecef; border-radius: 10px;
+                        background: white; color: #212529; font-size: 15px; font-weight: 600; cursor: pointer;
+                        transition: border-color 0.2s, background 0.2s;
+                    ">◀ Gauche</button>
+                    <button id="kwyk-side-right-btn" style="
+                        flex: 1; padding: 14px 10px; border: 2px solid #e9ecef; border-radius: 10px;
+                        background: white; color: #212529; font-size: 15px; font-weight: 600; cursor: pointer;
+                        transition: border-color 0.2s, background 0.2s;
+                    ">Droite ▶</button>
+                </div>
+                <button id="kwyk-side-validate" disabled style="
+                    width: 100%; padding: 10px; border: none; border-radius: 8px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white; font-size: 14px; font-weight: 600; cursor: not-allowed;
+                    opacity: 0.4; transition: opacity 0.2s;
+                ">Valider</button>
+            </div>
+        `;
+
+        const header = panel.querySelector('.kwyk-tutor-header');
+        if (header) header.after(sideForm);
+
+        const leftBtn = document.getElementById('kwyk-side-left-btn');
+        const rightBtn = document.getElementById('kwyk-side-right-btn');
+        const validateBtn = document.getElementById('kwyk-side-validate');
+
+        function selectSide(side) {
+            selectedSide = side;
+            // Highlight le bouton sélectionné
+            leftBtn.style.borderColor = side === 'left' ? '#667eea' : '#e9ecef';
+            leftBtn.style.background = side === 'left' ? '#f0f4ff' : 'white';
+            rightBtn.style.borderColor = side === 'right' ? '#667eea' : '#e9ecef';
+            rightBtn.style.background = side === 'right' ? '#f0f4ff' : 'white';
+            // Activer le bouton Valider
+            validateBtn.disabled = false;
+            validateBtn.style.opacity = '1';
+            validateBtn.style.cursor = 'pointer';
+            // Aperçu en temps réel
+            applyPanelSide(side);
+        }
+
+        function confirmSide() {
+            if (!selectedSide) return;
+            config.panelSide = selectedSide;
+            chrome.storage.sync.set({ panelSide: selectedSide });
+            sideForm.remove();
+            elementsToHide.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = '';
+            });
+            continueInit();
+        }
+
+        leftBtn.addEventListener('click', () => selectSide('left'));
+        rightBtn.addEventListener('click', () => selectSide('right'));
+        validateBtn.addEventListener('click', confirmSide);
     }
 
     /**
@@ -569,6 +652,10 @@
                     }
                     if (changes.cheatAutoNext !== undefined) {
                         config.cheatAutoNext = changes.cheatAutoNext.newValue;
+                    }
+                    if (changes.panelSide) {
+                        config.panelSide = changes.panelSide.newValue;
+                        applyPanelSide(config.panelSide);
                     }
                 }
             });
@@ -785,10 +872,17 @@
             return;
         }
 
-        // Si pseudo non défini : afficher le formulaire de pseudo
+        // Si pseudo non défini : afficher le formulaire de pseudo (puis côté)
         if (!userPseudo) {
             console.log('[Kwyk Tutor] Pseudo non défini, affichage du formulaire');
             showPseudoPrompt();
+            return;
+        }
+
+        // Si côté non encore choisi : afficher seulement le formulaire de côté
+        if (!config.panelSide) {
+            console.log('[Kwyk Tutor] Côté non défini, affichage du formulaire');
+            showSidePrompt();
             return;
         }
 
@@ -864,18 +958,32 @@
     function loadConfig() {
         return new Promise((resolve) => {
             if (chrome?.storage?.sync) {
-                chrome.storage.sync.get(['mistralApiKey', 'model', 'mode', 'cheatAutoValidate', 'cheatAutoNext'], (r) => {
+                chrome.storage.sync.get(['mistralApiKey', 'model', 'mode', 'cheatAutoValidate', 'cheatAutoNext', 'panelSide'], (r) => {
                     if (r.mistralApiKey) config.mistralApiKey = r.mistralApiKey;
                     if (r.model) config.model = r.model;
                     if (r.mode) config.mode = r.mode;
                     if (r.cheatAutoValidate !== undefined) config.cheatAutoValidate = r.cheatAutoValidate;
                     if (r.cheatAutoNext !== undefined) config.cheatAutoNext = r.cheatAutoNext;
+                    if (r.panelSide) config.panelSide = r.panelSide;
                     resolve();
                 });
             } else {
                 resolve();
             }
         });
+    }
+
+    /**
+     * Applique la position du panneau (gauche ou droite)
+     * null → droite (comportement par défaut)
+     */
+    function applyPanelSide(side) {
+        if (side === 'left') {
+            document.body.classList.add('kwyk-side-left');
+        } else {
+            document.body.classList.remove('kwyk-side-left');
+        }
+        console.log('[Kwyk Tutor] Position panneau:', side || 'right (défaut)');
     }
 
     // ===========================================
@@ -1088,7 +1196,7 @@
             <div class="kwyk-status" id="kwyk-status"></div>
             <div class="kwyk-action-buttons" id="kwyk-actions">
                 <button class="kwyk-action-btn primary" id="btn-explain">Explique</button>
-                <button class="kwyk-action-btn secondary" id="btn-hint">Indice</button>
+                <button class="kwyk-action-btn secondary" id="btn-hint">Règle</button>
                 <button class="kwyk-action-btn warning" id="btn-answer">Réponse</button>
             </div>
             <div class="kwyk-cheat-mode" id="kwyk-cheat-section" style="display:none;">
@@ -1116,21 +1224,40 @@
 
         // Event pour le switch du mode triche
         document.getElementById('kwyk-cheat-switch').addEventListener('change', handleCheatToggle);
+
+        // Appliquer la position sauvegardée
+        applyPanelSide(config.panelSide);
     }
 
+    // Clic sur le bouton : ouvre/ferme le panel uniquement
     function togglePanel() {
         const panel = document.getElementById('kwyk-tutor-panel');
-        if (panel) {
-            panel.classList.toggle('open');
+        if (panel) panel.classList.toggle('open');
+    }
+
+    // Ctrl+Enter : masque bouton ET panel (si visibles) → réaffiche le bouton seul au second appui
+    function toggleVisibility() {
+        const panel = document.getElementById('kwyk-tutor-panel');
+        const btn = document.getElementById('kwyk-tutor-btn');
+        if (!btn) return;
+
+        if (btn.style.display === 'none') {
+            // Tout est caché → réafficher le bouton (panel reste fermé)
+            btn.style.display = '';
+            console.log('[Kwyk Tutor] Bouton réaffiché');
+        } else {
+            // Tout est visible → fermer le panel ET cacher le bouton
+            if (panel) panel.classList.remove('open');
+            btn.style.display = 'none';
+            console.log('[Kwyk Tutor] Bouton et panel masqués');
         }
     }
 
-    // V12: Raccourci clavier Ctrl+Enter pour ouvrir/fermer le panneau
+    // V12: Raccourci clavier Ctrl+Enter pour masquer/afficher bouton + panel
     document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.key === 'Enter') {
             e.preventDefault();
-            togglePanel();
-            console.log('[Kwyk Tutor] Raccourci Ctrl+Enter: panneau toggled');
+            toggleVisibility();
         }
     });
 
@@ -1852,6 +1979,11 @@
         // V12: Convertir ℝ seul en \mathbb{R} (domaine = tous les réels)
         // IMPORTANT: Doit être APRÈS la conversion ℝ{...} pour ne pas interférer
         latex = latex.replace(/ℝ/g, '\\mathbb{R}');
+
+        // Ensemble solution : {1, 2} → \{1, 2\}
+        // MathQuill traite {x} comme groupement LaTeX invisible — il faut \{x\} pour afficher les accolades
+        // Seulement quand toute la valeur est enveloppée dans {}, sans accolades imbriquées
+        latex = latex.replace(/^\{([^{}]+)\}$/, '\\{$1\\}');
 
         console.log('[Kwyk Tutor] Conversion LaTeX:', value, '->', latex);
         return latex;
@@ -2627,6 +2759,8 @@
         // V14: Extraire les fonctions des graphiques Raphaël (représentations graphiques)
         // Les graphes Raphaël contiennent un JSON avec "plot": [["function(x){ return ...}", [min, max]]]
         // On remplace tout le bloc SVG + JSON par un texte lisible "Graphique X : y = ..."
+        // V17: Extraction de TOUTES les courbes du plot (pas seulement plot[0])
+        //      Nommage via config.label (ex: \mathcal{C}_f → "f") en faisant correspondre les couleurs
         const graphSpans = clonedBlock.querySelectorAll('span');
         let graphLetterIndex = 0;
         const graphLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -2637,12 +2771,41 @@
                 try {
                     const config = JSON.parse(jsonMatch[0]);
                     if (config.plot && config.plot.length > 0) {
-                        const funcStr = config.plot[0][0]; // "function(x){ return -x - 3;}"
-                        const exprMatch = funcStr.match(/return\s+(.+?)\s*;?\s*\}/);
-                        if (exprMatch) {
-                            const letter = graphLetters[graphLetterIndex] || (graphLetterIndex + 1);
-                            const cleanExpr = exprMatch[1].replace(/\s+/g, ' ').trim();
-                            span.textContent = `\n[Graphique ${letter} : y = ${cleanExpr}]\n`;
+                        // Construire un mapping couleur → nom depuis config.label
+                        const colorToName = {};
+                        if (Array.isArray(config.label)) {
+                            config.label.forEach(lbl => {
+                                const labelText = String(lbl[1] || '');
+                                const color = (lbl[3] && lbl[3].color) ? lbl[3].color.toLowerCase() : '';
+                                // Extraire la lettre de \mathcal{C}_f → "f"
+                                const nameMatch = labelText.match(/\\mathcal\{C\}_(\w+)/);
+                                const name = nameMatch ? nameMatch[1] : labelText.replace(/\\/g, '').trim();
+                                if (color && name) colorToName[color] = name;
+                            });
+                        }
+                        // Extraire toutes les courbes
+                        const graphLines = [];
+                        config.plot.forEach((plotEntry, pi) => {
+                            const funcStr = plotEntry[0] || '';
+                            const exprMatch = funcStr.match(/return\s+(.+?)\s*;?\s*\}/);
+                            if (exprMatch) {
+                                const cleanExpr = exprMatch[1].replace(/\s+/g, ' ').trim();
+                                const stroke = (plotEntry[2] && plotEntry[2].stroke) ? plotEntry[2].stroke.toLowerCase() : '';
+                                const name = colorToName[stroke] || graphLetters[graphLetterIndex + pi] || String(pi + 1);
+                                graphLines.push(`[Graphique ${name} : y = ${cleanExpr}]`);
+                            }
+                        });
+                        if (graphLines.length > 0) {
+                            span.textContent = `\n${graphLines.join('\n')}\n`;
+                            // Supprimer les spans de labels Raphaël (position:absolute) dans le parent
+                            // Ces spans contiennent les numéros d'axes (0, 5, -5...) et les labels (Cf, Cg)
+                            // Ils ne sont PAS dans le SVG → non supprimés par svg.remove()
+                            const parent = span.parentElement;
+                            if (parent) {
+                                Array.from(parent.querySelectorAll('span[style*="position"]')).forEach(s => {
+                                    if (s !== span) s.remove();
+                                });
+                            }
                             graphLetterIndex++;
                         }
                     }
@@ -2936,8 +3099,8 @@
     function mergeResults(results) {
         const merged = {
             solution: {
-                notion: [],
-                methode: '',
+                regle: '',
+                exemple: null,
                 etapes: [],
                 reponses: []
             }
@@ -2947,9 +3110,12 @@
         results.forEach((result, i) => {
             if (result.error) return;
             const s = result.solution;
-            if (s.notion) merged.solution.notion.push(s.notion);
-            if (s.methode) merged.solution.methode += (merged.solution.methode ? '\n\n' : '') + `Q${i + 1}: ${s.methode}`;
-            if (s.etapes) merged.solution.etapes.push(...s.etapes.map(e => `Q${i + 1}: ${e}`));
+            if (s.regle) merged.solution.regle += (merged.solution.regle ? ' | ' : '') + s.regle;
+            if (s.exemple && !merged.solution.exemple) merged.solution.exemple = s.exemple;
+            if (s.etapes) merged.solution.etapes.push(...s.etapes.map(e => {
+                if (typeof e === 'string') return { titre: `Q${i + 1}: ${e}`, calculs: [] };
+                return { titre: `Q${i + 1}: ${e.titre || ''}`, calculs: e.calculs || [] };
+            }));
 
             // Renuméroter les réponses
             if (s.reponses) {
@@ -2968,7 +3134,6 @@
             }
         });
 
-        merged.solution.notion = merged.solution.notion.join(' | ');
         return merged;
     }
 
@@ -3073,9 +3238,14 @@
      * Règles JSON, formatage math, et structure générale.
      */
     function getBasePrompt() {
-        return `Tu es un assistant mathématique précis niveau lycée.
-Tu donnes les réponses correctes et complètes aux exercices Kwyk.
-La réponse doit être PRÊTE À COPIER-COLLER directement dans Kwyk.
+        return `Tu es un assistant mathématique pédagogique niveau Seconde (lycée, France).
+Tu expliques clairement, étape par étape, comme un professeur écrit au tableau.
+
+NIVEAU SECONDE — conseils à respecter:
+- Vocabulaire accessible : "on soustrait", "on divise", "le coefficient est positif donc..."
+- Ne JAMAIS utiliser les dérivées (f'(x)) — expliquer les variations à partir de la forme de la fonction (parabole ouverte vers le haut/bas, droite croissante/décroissante selon le signe de a)
+- Rappeler la règle sous-jacente si elle est non évidente (ex: "le produit de deux négatifs est positif")
+- Ne pas sauter d'étape sans justification visible
 
 RÈGLES JSON:
 - N'utilise JAMAIS de caractères d'échappement comme \\n, \\t, \\x
@@ -3084,14 +3254,29 @@ RÈGLES JSON:
 
 FORMATAGE MATHÉMATIQUE:
 - Fractions: TOUJOURS (numérateur)/(dénominateur) avec parenthèses. Correct: (1)/(3), (x+1)/(x-2). INCORRECT: 1/3, x+1/x-2
-- Racines: √ ou sqrt(). JAMAIS "racine carrée de"
-- Racines TOUJOURS SIMPLIFIÉES: extraire les facteurs parfaits. √28 = 2√7, √12 = 2√3, √45 = 3√5, √50 = 5√2. Ne JAMAIS laisser un entier non simplifié sous le radical si un facteur carré peut être sorti.
+- Racines: √ ou sqrt(). TOUJOURS SIMPLIFIÉES: √28 = 2√7, √12 = 2√3, √45 = 3√5, √50 = 5√2. Ne JAMAIS laisser un entier non simplifié sous le radical si un facteur carré peut être sorti.
 - Puissances: x^2 pour x²
 - Multiplication: JAMAIS de *. Écrire 3x, PAS 3*x
 - Domaines ensemble: ℝ{4} (si l'énoncé demande un ensemble)
 - Domaines intervalle: ]-∞;4[∪]4;+∞[ (si l'énoncé demande un intervalle)
 
-RÈGLE STRICTE POUR "reponse":
+RÈGLES STRICTES DE FORMATAGE (appliquées à TOUS les champs):
+- INTERDIT dans tous les champs: ××, **, __, listes numérotées (1. 2. 3.), tirets de liste (- item)
+
+"regle" — règles ABSOLUES:
+- UNE SEULE phrase, MAX 120 caractères
+- Uniquement la propriété mathématique du cours, rien d'autre
+- CORRECT: "Pour résoudre ax + b = 0 : soustraire b des deux membres, puis diviser par a"
+- INCORRECT: tout texte dépassant une phrase, toute explication de démarche, tout développement
+
+"etapes" — règles ABSOLUES:
+- Chaque élément = UN calcul mathématique court (expression, équation, inégalité, valeur)
+- JAMAIS de phrase en français, JAMAIS d'explication textuelle
+- CORRECT: "2x - 4 = 0", "x = 2", "f(x) < 0 sur ]-∞;2["
+- INCORRECT: "On cherche quand f s'annule", "La courbe est en dessous de l'axe", "On note que..."
+- Utiliser "---" pour séparer deux phases de calcul distinctes
+
+RÈGLE STRICTE POUR "reponse" dans "reponses":
 - Contient UNIQUEMENT la valeur finale, JAMAIS d'explication ni d'étape intermédiaire
 - Exemples corrects: "42", "(3)/(5)", "A", "√7", "x^2 + 3"
 - Exemples INCORRECTS: "La réponse est 42", "8*x", une étape intermédiaire`;
@@ -3109,28 +3294,34 @@ TYPE D'EXERCICE: QCM simple (une seule réponse à cocher parmi les options).
 
 Réponds avec ce JSON exact:
 {
-  "notion": "Concept mathématique",
-  "methode": "Méthode de résolution",
-  "etapes": ["Étape 1", "Étape 2"],
+  "regle": "Règle ou formule courte utilisée pour résoudre",
+  "exemple": {
+    "enonce": "Un exemple similaire mais DIFFÉRENT de l'exercice posé",
+    "etapes": ["calcul 1", "calcul 2", "résultat"]
+  },
+  "etapes": ["calcul 1", "calcul 2", "résultat"],
   "reponses": [
-    {"question": 1, "type": "qcm", "reponse": "LETTRE ou TEXTE EXACT de l'option", "explication": "Justification"}
+    {"question": 1, "type": "qcm", "reponse": "LETTRE ou TEXTE EXACT de l'option"}
   ]
 }
 
 EXEMPLE — Énoncé: "Quelle est la forme factorisée de x²-9 ? A) (x-3)² B) (x+3)(x-3) C) (x+9)(x-9)"
 Réponse:
-{"notion": "Identités remarquables", "methode": "a²-b² = (a+b)(a-b)", "etapes": ["x²-9 = x²-3²", "On applique a²-b² = (a+b)(a-b)", "x²-9 = (x+3)(x-3)"], "reponses": [{"question": 1, "type": "qcm", "reponse": "B", "explication": "x²-9 = x²-3² = (x+3)(x-3), c'est l'identité remarquable a²-b²"}]}`,
+{"regle": "a²-b² = (a+b)(a-b) : identité remarquable différence de deux carrés", "exemple": {"enonce": "Factoriser x²-25", "etapes": ["x²-25 = x²-5²", "(x+5)(x-5)"]}, "etapes": ["x²-9 = x²-3²", "x²-3² = (x+3)(x-3)"], "reponses": [{"question": 1, "type": "qcm", "reponse": "B"}]}`,
 
             qcm_multiple: `
 TYPE D'EXERCICE: QCM multiple (plusieurs cases à cocher).
 
 Réponds avec ce JSON exact:
 {
-  "notion": "Concept mathématique",
-  "methode": "Méthode de résolution",
-  "etapes": ["Étape 1", "Étape 2"],
+  "regle": "Règle ou critère pour identifier les bonnes réponses",
+  "exemple": {
+    "enonce": "Un exemple similaire mais DIFFÉRENT de l'exercice posé",
+    "etapes": ["option A : ...", "option B : ...", "→ réponses correctes : A, C"]
+  },
+  "etapes": ["option A : ...", "option B : ...", "→ réponses correctes : A, C"],
   "reponses": [
-    {"question": 1, "type": "qcm_multiples", "reponses": ["A", "C"], "explication": "Justification"}
+    {"question": 1, "type": "qcm_multiples", "reponses": ["A", "C"]}
   ]
 }
 
@@ -3138,18 +3329,21 @@ IMPORTANT: utilise "reponses" (pluriel) avec un ARRAY de lettres/textes.
 
 EXEMPLE — Énoncé: "Parmi ces fonctions, lesquelles sont affines ? A) f(x)=3 B) f(x)=x² C) f(x)=2x+1 D) f(x)=√x"
 Réponse:
-{"notion": "Fonctions affines", "methode": "Une fonction affine est de la forme f(x)=ax+b", "etapes": ["f(x)=3 est affine (a=0, b=3, constante est un cas particulier d'affine)", "f(x)=x² n'est pas affine (degré 2)", "f(x)=2x+1 est affine (a=2, b=1)", "f(x)=√x n'est pas affine"], "reponses": [{"question": 1, "type": "qcm_multiples", "reponses": ["A", "C"], "explication": "f(x)=3 (constante=affine avec a=0) et f(x)=2x+1 sont de la forme ax+b"}]}`,
+{"regle": "Une fonction affine est de la forme f(x) = ax+b. Une constante (a=0) est un cas particulier d'affine.", "exemple": {"enonce": "Parmi f(x)=2, g(x)=x³, h(x)=5x-1 : lesquelles sont affines ?", "etapes": ["f(x)=2 : a=0, b=2 → affine ✓", "g(x)=x³ : degré 3 → pas affine ✗", "h(x)=5x-1 : a=5, b=-1 → affine ✓"]}, "etapes": ["A) f(x)=3 : a=0, b=3 → affine ✓", "B) f(x)=x² : degré 2 → pas affine ✗", "C) f(x)=2x+1 : a=2, b=1 → affine ✓", "D) f(x)=√x : racine → pas affine ✗"], "reponses": [{"question": 1, "type": "qcm_multiples", "reponses": ["A", "C"]}]}`,
 
             input: `
 TYPE D'EXERCICE: Saisie de réponse (champ texte ou MathQuill).
 
 Réponds avec ce JSON exact:
 {
-  "notion": "Concept mathématique",
-  "methode": "Méthode de résolution",
-  "etapes": ["Étape 1", "Étape 2"],
+  "regle": "Règle ou formule courte utilisée pour résoudre",
+  "exemple": {
+    "enonce": "Un exemple similaire mais DIFFÉRENT de l'exercice posé",
+    "etapes": ["calcul 1", "calcul 2", "résultat"]
+  },
+  "etapes": ["calcul 1", "calcul 2", "résultat"],
   "reponses": [
-    {"question": 1, "type": "input", "reponse": "VALEUR EXACTE", "explication": "Justification"}
+    {"question": 1, "type": "input", "reponse": "VALEUR EXACTE"}
   ]
 }
 
@@ -3157,7 +3351,7 @@ S'il y a plusieurs questions, ajoute un objet par question dans "reponses" avec 
 
 EXEMPLE — Énoncé: "Résoudre 2x + 6 = 0"
 Réponse:
-{"notion": "Équation du premier degré", "methode": "Isoler x: ax + b = 0 → x = -b/a", "etapes": ["2x + 6 = 0", "2x = -6", "x = (-6)/(2)", "x = -3"], "reponses": [{"question": 1, "type": "input", "reponse": "-3", "explication": "2x + 6 = 0 donc 2x = -6 donc x = -3"}]}`,
+{"regle": "Pour résoudre ax + b = 0 : soustraire b des deux membres, puis diviser par a", "exemple": {"enonce": "Résoudre 3x - 9 = 0", "etapes": ["3x - 9 = 0", "3x = 9  (on ajoute 9 des deux membres)", "x = (9)/(3)  (on divise par 3)", "x = 3"]}, "etapes": ["2x + 6 = 0", "2x = -6  (on soustrait 6 des deux membres)", "x = (-6)/(2)  (on divise par 2)", "x = -3"], "reponses": [{"question": 1, "type": "input", "reponse": "-3"}]}`,
 
             tableau_signes: `
 TYPE D'EXERCICE: Tableau de signes à compléter.
@@ -3167,9 +3361,12 @@ Numérote les cases de gauche à droite.
 
 Réponds avec ce JSON exact:
 {
-  "notion": "Concept mathématique",
-  "methode": "Méthode de résolution",
-  "etapes": ["Étape 1", "Étape 2"],
+  "regle": "Règle pour déterminer les signes d'une fonction",
+  "exemple": {
+    "enonce": "Un exemple similaire mais DIFFÉRENT de l'exercice posé",
+    "etapes": ["calcul 1", "calcul 2", "résultat"]
+  },
+  "etapes": ["calcul 1", "calcul 2", "résultat"],
   "reponses": [
     {"question": 1, "type": "input", "reponse": "+"},
     {"question": 2, "type": "input", "reponse": "0"},
@@ -3194,11 +3391,11 @@ VÉRIFICATION OBLIGATOIRE du signe aux extrémités:
 
 EXEMPLE 1 — Énoncé: "Tableau de signes de f(x) = 2x - 4"
 Réponse:
-{"notion": "Signe d'une fonction affine", "methode": "f(x) = 0 quand x = 2. Coefficient a=2 > 0 donc f est croissante: négative avant 2, positive après", "etapes": ["2x - 4 = 0", "x = 2", "a = 2 > 0: négatif avant 2, positif après"], "reponses": [{"question": 1, "type": "input", "reponse": "-"}, {"question": 2, "type": "input", "reponse": "0"}, {"question": 3, "type": "input", "reponse": "+"}], "tableau": {"type": "signes", "headers": ["x", "-∞", "2", "+∞"], "rows": [{"label": "f(x)", "values": ["-", "0", "+"]}]}}
+{"regle": "f(x) = ax + b s'annule en x = -b/a. Si a > 0 : f est négative avant, positive après. Si a < 0 : l'inverse.", "exemple": {"enonce": "Tableau de signes de f(x) = 3x - 6", "etapes": ["3x - 6 = 0 → x = 2", "---", "a = 3 > 0 : f(x) < 0 sur ]-∞;2[", "f(x) > 0 sur ]2;+∞["]}, "etapes": ["2x - 4 = 0 → x = 2", "---", "a = 2 > 0 : f(x) < 0 sur ]-∞;2[", "f(x) > 0 sur ]2;+∞["], "reponses": [{"question": 1, "type": "input", "reponse": "-"}, {"question": 2, "type": "input", "reponse": "0"}, {"question": 3, "type": "input", "reponse": "+"}], "tableau": {"type": "signes", "headers": ["x", "-∞", "2", "+∞"], "rows": [{"label": "f(x)", "values": ["-", "0", "+"]}]}}
 
 EXEMPLE 2 — Énoncé: "Tableau de signes de f(x) = (-x-1)(6x-4)"
 Réponse:
-{"notion": "Signe d'un trinôme", "methode": "Racines: -x-1=0 → x=-1, 6x-4=0 → x=2/3. Développé: -6x²+4x+6x-4 = -6x²+10x-4. Coefficient dominant a=-6 < 0 → parabole ouverte vers le bas → commence par -, finit par -", "etapes": ["-x-1=0 → x=-1", "6x-4=0 → x=2/3", "a=-6 < 0: commence par -, finit par -", "Signes: -, 0, +, 0, -"], "reponses": [{"question": 1, "type": "input", "reponse": "-"}, {"question": 2, "type": "input", "reponse": "0"}, {"question": 3, "type": "input", "reponse": "+"}, {"question": 4, "type": "input", "reponse": "0"}, {"question": 5, "type": "input", "reponse": "-"}], "tableau": {"type": "signes", "headers": ["x", "-∞", "-1", "2/3", "+∞"], "rows": [{"label": "f(x)", "values": ["-", "0", "+", "0", "-"]}]}}`,
+{"regle": "Pour un produit de facteurs : le signe est + si les deux facteurs ont le même signe, - sinon. Le signe aux extrémités dépend du coefficient dominant.", "exemple": {"enonce": "Tableau de signes de f(x) = (x-2)(x+1)", "etapes": ["x-2 = 0 → x = 2", "x+1 = 0 → x = -1", "---", "a = 1 > 0 : + aux extrémités", "Sur ]-∞;-1[ : +, sur ]-1;2[ : -, sur ]2;+∞[ : +"]}, "etapes": ["-x-1 = 0 → x = -1", "6x-4 = 0 → x = (2)/(3)", "---", "a = -6 < 0 : - aux extrémités", "Sur ]-∞;-1[ : -, sur ]-1;(2)/(3)[ : +, sur ](2)/(3);+∞[ : -"], "reponses": [{"question": 1, "type": "input", "reponse": "-"}, {"question": 2, "type": "input", "reponse": "0"}, {"question": 3, "type": "input", "reponse": "+"}, {"question": 4, "type": "input", "reponse": "0"}, {"question": 5, "type": "input", "reponse": "-"}], "tableau": {"type": "signes", "headers": ["x", "-∞", "-1", "(2)/(3)", "+∞"], "rows": [{"label": "f(x)", "values": ["-", "0", "+", "0", "-"]}]}}`,
 
             tableau_variations: `
 TYPE D'EXERCICE: Tableau de variations à compléter.
@@ -3215,9 +3412,12 @@ RÈGLE ABSOLUE — FORMAT DES VALUES:
 
 Réponds avec ce JSON exact:
 {
-  "notion": "Concept mathématique",
-  "methode": "Méthode de résolution",
-  "etapes": ["Étape 1", "Étape 2"],
+  "regle": "Règle pour déterminer les variations d'une fonction (sans dérivée — expliquer à partir de la forme)",
+  "exemple": {
+    "enonce": "Un exemple similaire mais DIFFÉRENT de l'exercice posé",
+    "etapes": ["calcul 1", "calcul 2  (raison si non évident)", "résultat"]
+  },
+  "etapes": ["calcul 1", "calcul 2  (raison si non évident)", "résultat"],
   "reponses": [
     {"question": 1, "type": "input", "reponse": "↘"},
     {"question": 2, "type": "input", "reponse": "↗"}
@@ -3235,11 +3435,11 @@ Les values contiennent UNIQUEMENT des flèches (↗/↘) et des séparateurs (||
 
 EXEMPLE 1 — Fonction continue: "Tableau de variations de f(x) = x² - 6x + 5 sur [-1; 5]"
 Réponse:
-{"notion": "Variations d'un polynôme du 2nd degré", "methode": "f'(x) = 2x - 6 = 0 quand x = 3. a > 0 donc f décroît puis croît", "etapes": ["f'(x) = 2x - 6", "f'(x) = 0 → x = 3", "Décroissante sur [-1;3], croissante sur [3;5]"], "reponses": [{"question": 1, "type": "input", "reponse": "↘"}, {"question": 2, "type": "input", "reponse": "↗"}], "tableau": {"type": "variation", "headers": ["x", "-1", "3", "5"], "rows": [{"label": "f(x)", "values": ["↘", "↗"]}]}}
+{"regle": "f(x) = ax² + bx + c : parabole avec sommet en x = -b/(2a). Si a > 0, elle décroît avant le sommet puis croît. Si a < 0, l'inverse.", "exemple": {"enonce": "Tableau de variations de f(x) = x² - 4x + 3 sur [0;4]", "etapes": ["a = 1 > 0 : parabole ouverte vers le haut  (minimum au sommet)", "sommet : x = -(-4)/(2×1) = 2", "---", "Sur [0;2] : f décroissante ↘  (on se rapproche du minimum)", "Sur [2;4] : f croissante ↗  (on s'éloigne du minimum)"]}, "etapes": ["a = 1 > 0 : parabole ouverte vers le haut  (minimum au sommet)", "sommet : x = -(-6)/(2×1) = 3", "---", "Sur [-1;3] : f décroissante ↘  (on se rapproche du minimum)", "Sur [3;5] : f croissante ↗  (on s'éloigne du minimum)"], "reponses": [{"question": 1, "type": "input", "reponse": "↘"}, {"question": 2, "type": "input", "reponse": "↗"}], "tableau": {"type": "variation", "headers": ["x", "-1", "3", "5"], "rows": [{"label": "f(x)", "values": ["↘", "↗"]}]}}
 
 EXEMPLE 2 — Fonction avec asymptote: "Tableau de variations de f(x) = (1)/(x)"
 Réponse:
-{"notion": "Variations de la fonction inverse", "methode": "f'(x) = -1/x² < 0 pour tout x ≠ 0 → décroissante sur ]-∞;0[ et ]0;+∞[. Asymptote verticale en x=0.", "etapes": ["f'(x) = -1/x² toujours négatif", "Sur ]-∞;0[: décroissante", "Sur ]0;+∞[: décroissante", "Discontinuité en x=0 (asymptote verticale)"], "reponses": [{"question": 1, "type": "input", "reponse": "↘"}, {"question": 2, "type": "input", "reponse": "↘"}], "tableau": {"type": "variation", "headers": ["x", "-∞", "0", "+∞"], "rows": [{"label": "f(x)", "values": ["↘", "||", "↘"]}]}}`,
+{"regle": "f(x) = (1)/(x) : quand x augmente (positif), (1)/(x) diminue. Asymptote verticale en x = 0 : la fonction n'est pas définie en 0.", "exemple": {"enonce": "Tableau de variations de f(x) = (2)/(x)", "etapes": ["x = 0 interdit  (division par zéro)", "---", "Sur ]-∞;0[ : quand x augmente vers 0⁻, (2)/(x) diminue vers -∞ → ↘", "Sur ]0;+∞[ : quand x augmente depuis 0⁺, (2)/(x) diminue → ↘"]}, "etapes": ["x = 0 interdit  (division par zéro)", "---", "Sur ]-∞;0[ : quand x augmente vers 0⁻, (1)/(x) diminue vers -∞ → ↘", "Sur ]0;+∞[ : quand x augmente depuis 0⁺, (1)/(x) diminue → ↘"], "reponses": [{"question": 1, "type": "input", "reponse": "↘"}, {"question": 2, "type": "input", "reponse": "↘"}], "tableau": {"type": "variation", "headers": ["x", "-∞", "0", "+∞"], "rows": [{"label": "f(x)", "values": ["↘", "||", "↘"]}]}}`,
 
             tableau_valeurs: `
 TYPE D'EXERCICE: Tableau de valeurs avec valeur(s) manquante(s) à calculer.
@@ -3249,35 +3449,58 @@ Calcule la/les valeur(s) manquante(s) (marquées par ?).
 
 Réponds avec ce JSON exact:
 {
-  "notion": "Concept mathématique",
-  "methode": "Méthode de résolution",
-  "etapes": ["Étape 1", "Étape 2"],
+  "regle": "Règle pour calculer les valeurs manquantes",
+  "exemple": {
+    "enonce": "Un exemple similaire mais DIFFÉRENT de l'exercice posé",
+    "etapes": ["calcul 1", "calcul 2", "résultat"]
+  },
+  "etapes": ["calcul 1", "calcul 2", "résultat"],
   "reponses": [
-    {"question": 1, "type": "input", "reponse": "VALEUR NUMÉRIQUE", "explication": "Justification"}
+    {"question": 1, "type": "input", "reponse": "VALEUR NUMÉRIQUE"}
   ]
 }
 
 EXEMPLE — Énoncé: "f est linéaire. [Tableau] x | -8 | -6 / f(x) | -2 | ? [/Tableau]"
 Réponse:
-{"notion": "Fonction linéaire", "methode": "f(x) = ax. On trouve a avec f(-8) = -2", "etapes": ["f(x) = ax", "f(-8) = -8a = -2 donc a = (1)/(4)", "f(-6) = (1)/(4) × (-6) = (-6)/(4) = (-3)/(2)"], "reponses": [{"question": 1, "type": "input", "reponse": "(-3)/(2)", "explication": "a = (1)/(4), donc f(-6) = (-3)/(2)"}]}`,
+{"regle": "Une fonction linéaire est de la forme f(x) = ax. On trouve a à partir d'un couple connu, puis on calcule les valeurs manquantes.", "exemple": {"enonce": "f est linéaire. [Tableau] x | -10 | -5 / f(x) | -2 | ? [/Tableau]", "etapes": ["f(x) = ax", "f(-10) = -2 → -10a = -2 → a = (1)/(5)", "f(-5) = (1)/(5) × (-5) = -1"]}, "etapes": ["f(x) = ax", "f(-8) = -2 → -8a = -2 → a = (1)/(4)", "f(-6) = (1)/(4) × (-6) = (-6)/(4) = (-3)/(2)"], "reponses": [{"question": 1, "type": "input", "reponse": "(-3)/(2)"}]}`,
 
             graphique: `
-TYPE D'EXERCICE: Identification de fonctions à partir de graphiques.
+TYPE D'EXERCICE: Exercice à partir de graphiques de fonctions.
+Les graphiques sont décrits sous la forme [Graphique f : y = expression].
 
-Les graphiques sont décrits sous la forme [Graphique A : y = expression].
-Analyse chaque expression pour identifier le type de fonction.
+DEUX CAS POSSIBLES — détecte lequel s'applique:
 
-INCLUSIONS IMPORTANTES:
-- Constante f(x) = k → c'est AUSSI une fonction affine (a=0)
-- Linéaire f(x) = ax → c'est AUSSI une fonction affine (b=0)
+CAS 1 — IDENTIFICATION: "Quel type de fonction représente ce graphique ?"
+- Analyse l'expression pour identifier le type (affine, linéaire, constante, polynôme...)
+- Constante f(x) = k → AUSSI affine (a=0). Linéaire f(x) = ax → AUSSI affine (b=0).
 - Si on demande "constante ET/OU affine ?", une constante est AUSSI affine → coche les DEUX
-- Si on demande "linéaire ET/OU affine ?", une linéaire est AUSSI affine → coche les DEUX
 
-Adapte le format JSON au type de question (QCM ou input) selon les options proposées.
+CAS 2 — RÉSOLUTION D'ÉQUATION/INÉGALITÉ: "Résoudre f(x) = g(x)" ou "f(x) ≤ g(x)"
+RÈGLES CRITIQUES — à respecter absolument:
+- Recopie les coefficients EXACTEMENT tels qu'ils apparaissent. Ne jamais arrondir.
+- Pour f(x) ≤ g(x) : calculer h(x) = f(x) - g(x), puis résoudre h(x) ≤ 0
+- Les exercices Kwyk ont TOUJOURS des racines entières ou simples → si tu trouves des décimales, tu as fait une erreur
+- Après avoir trouvé les racines, vérifie en substituant dans l'expression originale
+- Signe de h(x) = ax² + bx + c : si a > 0, négatif entre les racines → [x1 ; x2]
 
-EXEMPLE — Énoncé: "Le graphique A : y = 3x + 2 représente une fonction: A) linéaire B) affine C) ni l'une ni l'autre"
+Réponds avec ce JSON exact:
+{
+  "regle": "Règle mathématique applicable (1 phrase)",
+  "exemple": {
+    "enonce": "Exemple similaire DIFFÉRENT de l'exercice posé",
+    "etapes": ["calcul 1", "calcul 2", "---", "résultat"]
+  },
+  "etapes": ["calcul 1", "calcul 2", "---", "résultat"],
+  "reponses": [{"question": 1, "type": "input", "reponse": "valeur"}]
+}
+
+EXEMPLE CAS 2 — Énoncé: "Résoudre f(x) ≤ g(x) avec [Graphique f : y = 0.05*Math.pow(x,2) + 0.1*x - 3] et [Graphique g : y = 0.02*Math.pow(x,2) + 0.2*x + 1]"
 Réponse:
-{"notion": "Classification des fonctions", "methode": "f(x) = ax + b est affine. Si b=0, elle est aussi linéaire", "etapes": ["y = 3x + 2 est de la forme ax + b avec a=3, b=2", "b ≠ 0 donc ce n'est pas linéaire", "C'est une fonction affine"], "reponses": [{"question": 1, "type": "qcm", "reponse": "B", "explication": "y = 3x + 2 est affine (forme ax+b) mais pas linéaire car b=2 ≠ 0"}]}`
+{"regle": "f(x) ≤ g(x) ⟺ f(x) - g(x) ≤ 0. On calcule h = f - g puis on résout h(x) ≤ 0.", "exemple": {"enonce": "Résoudre h(x) = x² - 2x - 8 ≤ 0", "etapes": ["h(x) = x² - 2x - 8", "Δ = 4 + 32 = 36", "x₁ = -2, x₂ = 4", "a = 1 > 0 → négatif entre les racines : [-2 ; 4]"]}, "etapes": ["f(x) = 0.05x² + 0.1x - 3", "g(x) = 0.02x² + 0.2x + 1", "h(x) = f(x) - g(x) = (0.05-0.02)x² + (0.1-0.2)x + (-3-1)", "h(x) = 0.03x² - 0.1x - 4", "---", "Δ = (-0.1)² - 4×0.03×(-4) = 0.01 + 0.48 = 0.49", "x₁ = (0.1 - 0.7) / (2×0.03) = -10  |  x₂ = (0.1 + 0.7) / (2×0.03) = (13)/(1)", "a = 0.03 > 0 → h(x) ≤ 0 entre les racines", "Solution : [-10 ; 13]"], "reponses": [{"question": 1, "type": "input", "reponse": "[-10 ; 13]"}]}
+
+EXEMPLE CAS 1 — Énoncé: "Le graphique A : y = 3x + 2 représente une fonction: A) linéaire B) affine C) ni l'une ni l'autre"
+Réponse:
+{"regle": "f(x) = ax + b est affine. Si b = 0, elle est aussi linéaire.", "exemple": {"enonce": "y = 5x : quel type ? A) linéaire B) affine", "etapes": ["y = 5x → b = 0 → linéaire ET affine"]}, "etapes": ["y = 3x + 2 → a = 3, b = 2", "b ≠ 0 → pas linéaire", "Forme ax+b → affine → B"], "reponses": [{"question": 1, "type": "qcm", "reponse": "B"}]}`
         };
 
         return typePrompts[exerciseType] || typePrompts['input'];
@@ -3353,13 +3576,16 @@ Réponse:
             const nextChar = i < jsonStr.length - 1 ? jsonStr[i + 1] : '';
             
             if (char === '\\') {
-                if (nextChar === '"' || nextChar === '\\' || nextChar === '/') {
-                    // Échappements valides : garder
+                if (nextChar === '"' || nextChar === '\\' || nextChar === '/' || nextChar === 'u') {
+                    // Échappements JSON structurels valides : garder tel quel
+                    // NB: b/f/n/r/t EXCLUS volontairement — \frac, \theta, \beta, etc. sont
+                    // des commandes LaTeX et ne doivent pas être interprétés comme contrôles JSON
                     result += char + nextChar;
                     i += 2;
                 } else {
-                    // Échappement invalide : SUPPRIMER
-                    result += ' ';
+                    // Échappement LaTeX (\{, \}, \frac, \theta, \mathbb, etc.) ou inconnu :
+                    // doubler le backslash → JSON.parse produira \X (littéral) au lieu de supprimer
+                    result += '\\\\' + nextChar;
                     i += 2;
                 }
             } else {
@@ -3460,8 +3686,8 @@ Réponse:
 
     function formatSolution(parsed) {
         const solution = {
-            notion: parsed.notion || 'Mathématiques',
-            methode: Array.isArray(parsed.methode) ? parsed.methode.join(' ') : (parsed.methode || ''),
+            regle: parsed.regle || parsed.notion || parsed.methode || '',
+            exemple: parsed.exemple || null,
             etapes: Array.isArray(parsed.etapes) ? parsed.etapes : [],
             reponses: []
         };
@@ -3549,16 +3775,19 @@ Réponse:
         console.log('[Kwyk Tutor] Utilisation du fallback parsing');
 
         const solution = {
-            notion: 'Mathématiques',
-            methode: '',
+            regle: '',
+            exemple: null,
             etapes: [],
             reponses: []
         };
 
-        // Extraire la notion
-        const notionMatch = content.match(/"notion"\s*:\s*"([^"]+)"/);
-        if (notionMatch) {
-            solution.notion = notionMatch[1];
+        // Extraire la règle (ou notion en fallback)
+        const regleMatch = content.match(/"regle"\s*:\s*"([^"]+)"/);
+        if (regleMatch) {
+            solution.regle = regleMatch[1];
+        } else {
+            const notionMatch = content.match(/"notion"\s*:\s*"([^"]+)"/);
+            if (notionMatch) solution.regle = notionMatch[1];
         }
 
         // Extraire les etapes (lignes commencant par des puces ou nombres)
@@ -3698,6 +3927,59 @@ Réponse:
     /**
      * Affiche la solution pour UNE question specifique
      */
+
+    /**
+     * Nettoie le texte IA : supprime les marqueurs parasites (××, **, __, listes numérotées)
+     */
+    function cleanText(text) {
+        if (!text) return '';
+        return String(text)
+            .replace(/××([^×]*)××/g, '$1')
+            .replace(/\*\*([^*]*)\*\*/g, '$1')
+            .replace(/\b\d+\.\s+/g, '')
+            .replace(/^[-•]\s+/gm, '')
+            .trim();
+    }
+
+    /**
+     * Nettoie la règle : garde uniquement la première phrase, max 160 chars
+     */
+    function cleanRegle(text) {
+        if (!text) return '';
+        let clean = cleanText(text);
+        // Garder seulement la première phrase
+        const firstSentence = clean.match(/^[^.!?\n]+[.!?]?/);
+        if (firstSentence) clean = firstSentence[0].trim();
+        // Tronquer si trop long
+        if (clean.length > 160) clean = clean.slice(0, 157) + '…';
+        return clean;
+    }
+
+    /**
+     * Rendu des étapes pédagogiques
+     * Accepte string[], {calculs[]}[] ou mix (rétrocompat)
+     * "---" → séparateur visuel entre phases
+     */
+    function renderSteps(etapes) {
+        if (!etapes || etapes.length === 0) return '';
+        const lines = [];
+        etapes.forEach(e => {
+            if (typeof e === 'string') {
+                lines.push(e);
+            } else if (Array.isArray(e.calculs)) {
+                e.calculs.forEach(c => lines.push(c));
+            }
+        });
+        if (lines.length === 0) return '';
+        // Déterminer l'index de la dernière ligne non-séparateur
+        const lastContentIndex = lines.reduce((last, line, i) => line === '---' ? last : i, -1);
+        return `<div class="kwyk-steps">${lines.map((line, i) => {
+            if (line === '---') return `<hr class="kwyk-step-sep">`;
+            const isLast = i === lastContentIndex;
+            return `<div class="kwyk-step-calc${isLast ? ' kwyk-step-calc-last' : ''}">${formatFractions(escapeHtml(cleanText(line)))}</div>`;
+        }).join('')}</div>`;
+    }
+
     function displaySolutionForQuestion(questionIndex, mode = 'answer') {
         if (!cachedSolution) return;
 
@@ -3722,36 +4004,19 @@ Réponse:
         switch (mode) {
             case 'explain':
                 html = `
-                    <div class="kwyk-section-notion">
-                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || '')}
-                    </div>
-                    ${s.methode ? `
-                    <div class="kwyk-section-formula">
-                        <span class="kwyk-badge formula">Méthode</span>
-                        <div style="margin-top:8px; line-height:1.5">${formatFractions(escapeHtml(s.methode))}</div>
-                    </div>` : ''}
-                    ${(s.etapes || []).length > 0 ? `
-                    <div class="kwyk-section-title">Raisonnement</div>
-                    <div class="kwyk-steps">
-                        ${s.etapes.map((e, i) => `<div class="kwyk-step">${i + 1}. ${formatFractions(escapeHtml(String(e)))}</div>`).join('')}
-                    </div>` : ''}
+                    ${s.regle ? `<div class="kwyk-rule-box">📐 ${formatFractions(escapeHtml(cleanRegle(s.regle)))}</div>` : ''}
+                    ${renderSteps(s.etapes)}
                 `;
                 break;
 
             case 'hint':
                 html = `
-                    <div class="kwyk-section-notion">
-                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || '')}
-                    </div>
-                    ${s.methode ? `
-                    <div class="kwyk-section-formula">
-                        <span class="kwyk-badge formula">Méthode</span>
-                        <div style="margin-top:8px; line-height:1.5">${formatFractions(escapeHtml(s.methode))}</div>
+                    ${s.regle ? `<div class="kwyk-rule-box">📐 ${formatFractions(escapeHtml(cleanRegle(s.regle)))}</div>` : ''}
+                    ${s.exemple ? `<div class="kwyk-exemple-box">
+                        <div class="kwyk-exemple-title">📖 Exemple</div>
+                        ${s.exemple.enonce ? `<div class="kwyk-exemple-enonce">${formatFractions(escapeHtml(cleanText(s.exemple.enonce)))}</div>` : ''}
+                        ${renderSteps(s.exemple.etapes)}
                     </div>` : ''}
-                    <div class="kwyk-section-hint">
-                        <span class="kwyk-badge hint">Indice</span>
-                        ${s.etapes?.[0] ? formatFractions(escapeHtml(String(s.etapes[0]))) : 'Applique la méthode ci-dessus'}
-                    </div>
                 `;
                 break;
 
@@ -3790,36 +4055,19 @@ Réponse:
         switch (mode) {
             case 'explain':
                 html = `
-                    <div class="kwyk-section-notion">
-                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || 'Mathématiques')}
-                    </div>
-                    ${s.methode ? `
-                    <div class="kwyk-section-formula">
-                        <span class="kwyk-badge formula">Méthode</span>
-                        <div style="margin-top:8px; line-height:1.5">${formatFractions(escapeHtml(s.methode))}</div>
-                    </div>` : ''}
-                    ${s.etapes.length > 0 ? `
-                    <div class="kwyk-section-title">Raisonnement</div>
-                    <div class="kwyk-steps">
-                        ${s.etapes.map((e, i) => `<div class="kwyk-step">${i + 1}. ${formatFractions(escapeHtml(String(e)))}</div>`).join('')}
-                    </div>` : ''}
+                    ${s.regle ? `<div class="kwyk-rule-box">📐 ${formatFractions(escapeHtml(cleanRegle(s.regle)))}</div>` : ''}
+                    ${renderSteps(s.etapes)}
                 `;
                 break;
 
             case 'hint':
                 html = `
-                    <div class="kwyk-section-notion">
-                        <span class="kwyk-badge">Notion</span> ${escapeHtml(s.notion || 'Mathématiques')}
-                    </div>
-                    ${s.methode ? `
-                    <div class="kwyk-section-formula">
-                        <span class="kwyk-badge formula">Méthode</span>
-                        <div style="margin-top:8px; line-height:1.5">${formatFractions(escapeHtml(s.methode))}</div>
+                    ${s.regle ? `<div class="kwyk-rule-box">📐 ${formatFractions(escapeHtml(cleanRegle(s.regle)))}</div>` : ''}
+                    ${s.exemple ? `<div class="kwyk-exemple-box">
+                        <div class="kwyk-exemple-title">📖 Exemple</div>
+                        ${s.exemple.enonce ? `<div class="kwyk-exemple-enonce">${formatFractions(escapeHtml(cleanText(s.exemple.enonce)))}</div>` : ''}
+                        ${renderSteps(s.exemple.etapes)}
                     </div>` : ''}
-                    <div class="kwyk-section-hint">
-                        <span class="kwyk-badge hint">Indice</span>
-                        ${s.etapes[0] ? formatFractions(escapeHtml(String(s.etapes[0]))) : 'Applique la méthode ci-dessus'}
-                    </div>
                 `;
                 break;
 

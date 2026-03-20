@@ -28,6 +28,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const cheatAutoValidate = document.getElementById('cheat-auto-validate');
     const cheatAutoNext = document.getElementById('cheat-auto-next');
 
+    // Elements position panneau
+    const optSideLeft = document.getElementById('opt-side-left');
+    const optSideRight = document.getElementById('opt-side-right');
+
     // Elements profil
     const userPseudoInput = document.getElementById('user-pseudo');
     const userIdInput = document.getElementById('user-id');
@@ -40,6 +44,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Evenements
     optPedagogique.addEventListener('click', () => selectMode('pedagogique'));
     optTriche.addEventListener('click', () => selectMode('triche'));
+    optSideLeft.addEventListener('click', () => selectSide('left'));
+    optSideRight.addEventListener('click', () => selectSide('right'));
     btnTest.addEventListener('click', testConnection);
     btnSave.addEventListener('click', saveConfig);
     btnReset.addEventListener('click', resetConfig);
@@ -177,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * Charge la configuration depuis le storage
      */
     function loadConfig() {
-        chrome.storage.sync.get(['mistralApiKey', 'model', 'mode', 'cheatAutoValidate', 'cheatAutoNext'], (result) => {
+        chrome.storage.sync.get(['mistralApiKey', 'model', 'mode', 'cheatAutoValidate', 'cheatAutoNext', 'panelSide'], (result) => {
             if (result.mistralApiKey) {
                 apiKeyInput.value = result.mistralApiKey;
             }
@@ -197,7 +203,31 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.cheatAutoNext) {
                 cheatAutoNext.checked = true;
             }
+            // Charger la position du panneau
+            if (result.panelSide) {
+                selectSide(result.panelSide);
+            } else {
+                selectSide('right');
+            }
         });
+    }
+
+    /**
+     * Sélectionne un côté
+     */
+    function selectSide(side) {
+        optSideLeft.classList.toggle('selected', side === 'left');
+        optSideRight.classList.toggle('selected', side === 'right');
+        optSideLeft.querySelector('input').checked = side === 'left';
+        optSideRight.querySelector('input').checked = side === 'right';
+    }
+
+    /**
+     * Obtient le côté sélectionné
+     */
+    function getSelectedSide() {
+        if (optSideLeft.classList.contains('selected')) return 'left';
+        return 'right';
     }
 
     /**
@@ -298,7 +328,8 @@ document.addEventListener('DOMContentLoaded', () => {
             model: modelSelect.value,
             mode: getSelectedMode(),
             cheatAutoValidate: cheatAutoValidate.checked,
-            cheatAutoNext: cheatAutoNext.checked
+            cheatAutoNext: cheatAutoNext.checked,
+            panelSide: getSelectedSide()
         };
 
         // Validation
@@ -322,6 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 apiKeyInput.value = '';
                 modelSelect.value = 'mistral-medium-latest';
                 selectMode('pedagogique');
+                selectSide('right');
                 testResult.style.display = 'none';
                 // Reset des options triche
                 cheatAutoValidate.checked = false;

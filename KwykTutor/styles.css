@@ -482,58 +482,68 @@
   background: #ff9800;
 }
 
-/* Section notion */
-.kwyk-section-notion {
-  padding: 8px 12px;
-  margin: 6px 0;
-  background: #f3e5f5;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #4a148c;
+/* Règle de cours */
+.kwyk-rule-box {
+  padding: 10px 14px;
+  margin: 6px 0 10px;
+  background: #e8eaf6;
+  border-left: 3px solid #5c6bc0;
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  color: #283593;
+  line-height: 1.5;
 }
 
-/* Section formule */
-.kwyk-section-formula {
-  padding: 10px 12px;
-  margin: 6px 0;
-  background: #e3f2fd;
-  border-radius: 6px;
-  font-size: 12px;
+/* Exemple du cours */
+.kwyk-exemple-box {
+  padding: 10px 14px;
+  margin: 8px 0;
+  background: #fce4ec;
+  border-left: 3px solid #e91e63;
+  border-radius: 0 6px 6px 0;
 }
 
-/* Section indice */
-.kwyk-section-hint {
-  padding: 10px 12px;
-  margin: 6px 0;
-  background: #fff3e0;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #e65100;
-}
-
-/* Titre de section */
-.kwyk-section-title {
+.kwyk-exemple-title {
   font-size: 11px;
-  font-weight: 600;
-  color: #495057;
-  margin: 10px 0 4px 0;
-  padding-bottom: 4px;
-  border-bottom: 1px solid #e9ecef;
+  font-weight: 700;
+  color: #880e4f;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 5px;
+}
+
+.kwyk-exemple-enonce {
+  font-size: 12px;
+  color: #ad1457;
+  font-style: italic;
+  margin-bottom: 8px;
 }
 
 /* Étapes */
 .kwyk-steps {
-  margin: 6px 0;
+  margin: 8px 0;
 }
 
-.kwyk-step {
-  padding: 6px 10px;
-  margin: 4px 0;
-  background: #f8f9fa;
-  border-left: 3px solid #667eea;
-  border-radius: 0 4px 4px 0;
-  font-size: 12px;
+.kwyk-step-calculs {
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid #dee2e6;
+}
+
+.kwyk-step-calc {
+  font-size: 13px;
+  color: #212529;
+  padding: 2px 0;
   line-height: 1.5;
+}
+
+.kwyk-step-calc-last {
+  font-weight: 600;
+}
+
+.kwyk-step-sep {
+  border: none;
+  border-top: 1px solid #dee2e6;
+  margin: 8px 0;
 }
 
 /* ===========================================
@@ -664,9 +674,10 @@
   font-size: 0.85em;
 }
 
-/* Fractions dans les étapes et formules - taille légèrement réduite */
-.kwyk-step .kwyk-fraction,
-.kwyk-section-formula .kwyk-fraction {
+/* Fractions dans les étapes et règles - taille légèrement réduite */
+.kwyk-step-calc .kwyk-fraction,
+.kwyk-rule-box .kwyk-fraction,
+.kwyk-exemple-box .kwyk-fraction {
   font-size: 0.95em;
 }
 
@@ -1188,4 +1199,23 @@
 
 [data-theme="dark"] .kwyk-variation-arrow.arrow-down {
   color: #ef5350;
+}
+
+/* ===========================================
+   POSITION PANNEAU - CÔTÉ GAUCHE
+   =========================================== */
+
+body.kwyk-side-left #kwyk-tutor-btn {
+  right: auto;
+  left: 15px;
+}
+
+body.kwyk-side-left #kwyk-tutor-panel {
+  right: auto;
+  left: 15px;
+}
+
+body.kwyk-side-left #kwyk-blocked-popup {
+  right: auto;
+  left: 15px;
 }
