@@ -1219,3 +1219,49 @@ body.kwyk-side-left #kwyk-blocked-popup {
   right: auto;
   left: 15px;
 }
+
+/* ===========================================
+   MODE RÉVISION
+   =========================================== */
+
+.kwyk-revision-section {
+  padding: 10px 14px;
+}
+
+.kwyk-revision-analyze-btn {
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.kwyk-revision-analyze-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+}
+
+.kwyk-revision-analyze-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.kwyk-revision-status {
+  text-align: center;
+  font-size: 12px;
+  color: #6c757d;
+  min-height: 18px;
+  margin-top: 8px;
+}
+
