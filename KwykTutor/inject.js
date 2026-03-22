@@ -71,8 +71,17 @@
                     mathField.latex(latex); // Plus robuste pour fractions dans intervalles
                 }
 
-                console.log('[Kwyk Tutor Inject] LaTeX inséré avec write() (index', fieldIndex + '):', latex);
-                console.log('[Kwyk Tutor Inject] Vérification stockage:', mathField.latex());
+                const method = latex.includes('\\mathbb') ? 'write' : 'latex';
+                const stored = mathField.latex();
+                console.log('[Kwyk Tutor Inject] LaTeX inséré avec', method + '() (index', fieldIndex + '):', latex);
+                console.log('[Kwyk Tutor Inject] Vérification stockage:', stored);
+
+                // Si MathQuill n'a rien stocké, signaler l'échec
+                if (!stored || stored.trim() === '') {
+                    console.error('[Kwyk Tutor Inject] ⚠️ MathQuill a rejeté le LaTeX (stockage vide)');
+                    window.postMessage({ type: callbackId, success: false, error: 'MathQuill stockage vide' }, '*');
+                    return;
+                }
                 window.postMessage({ type: callbackId, success: true }, '*');
 
             } catch (e) {
