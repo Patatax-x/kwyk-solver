@@ -1,183 +1,65 @@
-# Plan de développement Kwyk Tutor V12
+# Plan V15 — Prompts modulaires par type d'exercice
 
-## Vue d'ensemble
-Version majeure avec améliorations UX, statistiques, et support étendu.
+## Objectif
+Remplacer le prompt monolithique (135 lignes envoyées systématiquement) par un systeme modulaire :
+- Detection du type d'exercice via le DOM (fiable a 99%)
+- Prompt = BASE courte + MODULE TYPE specifique + exemple JSON concret (few-shot)
+- L'IA recoit moins d'instructions, plus ciblees, et un exemple a imiter
 
----
+## Problemes resolus
+1. L'IA ne devine plus le type → le code JS le detecte et impose le format
+2. Prompt 3-4x plus court → moins de dilution d'attention
+3. Exemples concrets (few-shot) → l'IA imite au lieu d'interpreter des regles
+4. Un seul format JSON montre par requete → plus de confusion entre structures
 
-## Phase 1 : Corrections de bugs critiques
-**Priorité : HAUTE | Durée estimée : 1-2h**
+## Types d'exercice detectes (DOM)
 
-### 1.1 Fix MathQuill
-- [ ] Revoir la détection des champs MathQuill (multiples sélecteurs)
-- [ ] Fix notation ensemble ℝ\{x} qui ne s'affiche pas
-- [ ] Améliorer communication content script ↔ inject script
-- [ ] Ajouter logs détaillés pour debug
+| Type | Detection DOM |
+|---|---|
+| `qcm_simple` | `input[type="radio"]` |
+| `qcm_multiple` | `input[type="checkbox"]` |
+| `input` | `input[type="text"]` ou `.mq-editable-field` |
+| `tableau_signes` | Grille interactive signes Kwyk (a identifier dans le DOM) |
+| `tableau_variations` | Grille interactive variations Kwyk (a identifier dans le DOM) |
+| `tableau_valeurs` | `table.prettytable` avec `?` dans les cellules |
+| `graphique` | Spans avec JSON Raphael `{"init":...,"plot":...}` |
 
-### 1.2 Fix timeout script injecté
-- [ ] Augmenter timeout ou ajouter retry
-- [ ] Fallback plus intelligent
+## Architecture du prompt
 
----
-
-## Phase 2 : Architecture et stockage
-**Priorité : HAUTE | Durée estimée : 1h**
-
-### 2.1 Module de stockage (storage.js)
-- [ ] Créer fichier storage.js dédié
-- [ ] Fonctions : saveExercise(), getExercise(), saveStats(), getStats()
-- [ ] Limite de taille : garder seulement les 100 derniers exercices
-- [ ] Structure données :
-  ```js
-  {
-    exercises: { hash: solution },  // Cache exercices
-    stats: { total, success, failed, avgTime },
-    settings: { theme, sounds, shortcuts }
-  }
-  ```
-
-### 2.2 Système de hash pour exercices
-- [ ] Créer hash unique par exercice (texte + type)
-- [ ] Vérifier cache avant appel API
-
----
-
-## Phase 3 : Sélection du modèle IA
-**Priorité : MOYENNE | Durée estimée : 30min**
-
-### 3.1 Options de modèle
-- [ ] Ajouter sélecteur dans options.html
-- [ ] Modèles disponibles :
-  - mistral-small-latest (rapide, économique)
-  - mistral-medium-latest (équilibré)
-  - mistral-large-latest (précis, coûteux)
-- [ ] Sauvegarder préférence
-
----
-
-## Phase 4 : Statistiques
-**Priorité : MOYENNE | Durée estimée : 1-2h**
-
-### 4.1 Collecte des stats
-- [ ] Compteur exercices résolus
-- [ ] Compteur succès/échecs
-- [ ] Temps moyen par exercice
-- [ ] Exercices par type (QCM, input, etc.)
-
-### 4.2 Affichage dans l'UI
-- [ ] Section "Stats" dans le panneau
-- [ ] Mini graphique ou barres de progression
-- [ ] Bouton reset stats
-
----
-
-## Phase 5 : Thème sombre
-**Priorité : BASSE | Durée estimée : 30min**
-
-### 5.1 Toggle thème
-- [ ] Ajouter bouton toggle dans l'UI
-- [ ] CSS variables pour couleurs
-- [ ] Sauvegarder préférence
-- [ ] Thème clair par défaut
-
----
-
-## Phase 6 : Raccourcis clavier
-**Priorité : MOYENNE | Durée estimée : 30min**
-
-### 6.1 Raccourci principal
-- [ ] Ctrl+Enter : ouvrir/fermer l'interface
-- [ ] Listener global sur la page
-- [ ] Éviter conflits avec Kwyk
-
----
-
-## Phase 7 : Notifications sonores
-**Priorité : BASSE | Durée estimée : 15min**
-
-### 7.1 Beep simple
-- [ ] Son succès (exercice validé)
-- [ ] Son erreur (optionnel)
-- [ ] Toggle on/off dans settings
-- [ ] Utiliser Web Audio API (pas de fichier)
-
----
-
-## Phase 8 : Support tableaux de variation
-**Priorité : HAUTE | Durée estimée : 2-3h**
-
-### 8.1 Analyse des tableaux
-- [ ] Détecter structure tableau HTML
-- [ ] Extraire les cases à remplir
-- [ ] Envoyer structure à l'IA
-
-### 8.2 Remplissage des tableaux
-- [ ] Mapper réponses IA → cases tableau
-- [ ] Gérer signes (+, -, 0)
-- [ ] Gérer flèches (↗, ↘)
-
----
-
-## Phase 9 : Optimisations
-**Priorité : BASSE | Durée estimée : 1h**
-
-### 9.1 Performance
-- [ ] Lazy loading de l'UI
-- [ ] Debounce détection exercice
-- [ ] Réduire taille du code
-
-### 9.2 Cache intelligent
-- [ ] Détecter exercices similaires
-- [ ] Réutiliser solutions proches
-
----
-
-## Ordre d'implémentation recommandé
-
-1. **Phase 1** - Fix bugs (obligatoire)
-2. **Phase 2** - Architecture stockage (fondation)
-3. **Phase 3** - Sélection modèle (rapide à faire)
-4. **Phase 6** - Raccourcis clavier (rapide)
-5. **Phase 7** - Sons (rapide)
-6. **Phase 4** - Statistiques (fun)
-7. **Phase 5** - Thème sombre (cosmétique)
-8. **Phase 8** - Tableaux de variation (complexe)
-9. **Phase 9** - Optimisations (polish)
-
----
-
-## Fichiers à créer/modifier
-
-| Fichier | Action | Description |
-|---------|--------|-------------|
-| storage.js | CRÉER | Module de stockage |
-| sounds.js | CRÉER | Module sons |
-| stats.js | CRÉER | Module statistiques |
-| content.js | MODIFIER | Intégrer modules, fix bugs |
-| inject.js | MODIFIER | Fix MathQuill |
-| options.html | MODIFIER | Ajouter sélecteur modèle |
-| options.js | MODIFIER | Sauvegarder modèle |
-| styles.css | MODIFIER | Thème sombre, stats UI |
-| manifest.json | MODIFIER | Permissions storage |
-
----
-
-## Commandes de test
-
-```bash
-# Vérifier structure
-ls -la kwyk-V12/
-
-# Tester extension
-# 1. chrome://extensions
-# 2. Charger l'extension non empaquetée
-# 3. Aller sur kwyk.fr
+```
+getSystemPrompt(exerciseType)
+    = getBasePrompt()           // ~30 lignes : regles JSON, formatage math universel
+    + getTypePrompt(type)       // ~20 lignes : format de reponse + exemple JSON complet
 ```
 
----
+## Phases
 
-## Notes
+### Phase 1 — Detection de type amelioree
+- [ ] Creer `classifyExercise(questions)` qui retourne le type precis
+- [ ] Differencier tableau_signes / tableau_variations / tableau_valeurs dans le DOM
+- [ ] Detecter les graphiques Raphael comme type a part
+- [ ] Ajouter `exerciseType` dans l'objet `currentExercise`
+- [ ] Logger le type detecte pour debug
 
-- Toujours tester après chaque phase
-- Garder V11 comme backup
-- Commiter après chaque phase fonctionnelle
+### Phase 2 — Prompts modulaires
+- [ ] Extraire `getBasePrompt()` : regles JSON + formatage math (commun a tous)
+- [ ] Creer `getTypePrompt(type)` avec un module par type :
+  - `qcm_simple` : format JSON + exemple concret
+  - `qcm_multiple` : format JSON + exemple concret
+  - `input` : format JSON + exemple concret
+  - `tableau_signes` : regles signes + exemple JSON complet
+  - `tableau_variations` : regles variations + exemple JSON complet
+  - `tableau_valeurs` : regles calcul + exemple JSON concret
+  - `graphique` : regles identification fonctions + exemple JSON
+- [ ] Modifier `getSystemPrompt()` pour accepter le type et combiner base + type
+- [ ] Fallback : si type inconnu → prompt actuel complet (securite)
+
+### Phase 3 — Integration
+- [ ] Passer `currentExercise.exerciseType` a `solveProblem()` → `getSystemPrompt(type)`
+- [ ] Modifier `buildPrompt()` pour inclure le type detecte dans le message user
+- [ ] Tester sur chaque type d'exercice
+- [ ] Ajuster les exemples few-shot selon les resultats
+
+### Phase 4 — Nettoyage
+- [ ] Supprimer l'ancien prompt monolithique une fois tout valide
+- [ ] Mettre a jour CLAUDE.md et README.md
