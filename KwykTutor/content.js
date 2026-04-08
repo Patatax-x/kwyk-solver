@@ -134,6 +134,16 @@
 
     // État
     let currentExercise = null;
+
+    // ── DEBUG STATE (accessible depuis la console via kwykDebug()) ──
+    window._kwykLastExchange = {};
+    window._kwykGetState = () => ({
+        exercise:    currentExercise,
+        cached:      cachedSolution,
+        cheatActive: cheatModeActive,
+        prefetch:    prefetchCache,
+        exchange:    window._kwykLastExchange
+    });
     let cachedSolution = null;
     let isLoading = false;
     let lastExerciseHash = '';
@@ -1489,6 +1499,13 @@
 
             // Résoudre le problème si pas encore en cache
             if (!cachedSolution) {
+                // 0. Solvers directs (priorité max — override tout cache IA)
+                const directSolution = tryDirectSolve();
+                if (directSolution) {
+                    console.log('[Kwyk Tutor] Résolution directe (triche) — bypass cache');
+                    cachedSolution = directSolution;
+                    cachedSolution._exerciseHash = currentHash;
+                } else {
                 // Vérifier le prefetch cache d'abord
                 const exId = extractExerciseIdFromUrl();
                 const prefetched = exId ? getPrefetchedSolution(exId) : null;
@@ -1537,6 +1554,7 @@
                 cachedSolution._exerciseHash = currentHash;
                 console.log('[Kwyk Tutor] Nouvelle solution mise en cache (hash:', currentHash?.substring(0, 20), ')');
                 } // fin else (prefetch miss → appel IA normal)
+                } // fin else (direct solver miss → prefetch / IA)
             } else {
                 console.log('[Kwyk Tutor] ✓ Réutilisation solution en cache (même exercice)');
             }
@@ -1635,7 +1653,7 @@
         const aiType = reponse.type || 'unknown';
         const domType = question.type;
 
-        console.log('[Kwyk Tutor] Type IA:', aiType, '| Type DOM:', domType);
+        console.log('[Kwyk Tutor] Type IA:', aiType, '| DOM:', domType, '| answerFormat:', question.answerFormat || '?');
 
         try {
             // Si l'IA dit qcm_multiples ou si le DOM a des checkboxes -> utiliser autoFillCheckbox
@@ -2142,10 +2160,10 @@
         // Supprimer les espaces autour des ; dans les ensembles/intervalles : { -2 ; 3 } → {-2;3}
         value = value.replace(/\s*;\s*/g, ';');
 
-        // Nettoyer les parenthèses inutiles autour de nombres seuls : -(2) → -2, (3) → 3
+        // Nettoyer les parenthèses inutiles autour de nombres seuls : -(2) → -2, (3) → 3, (-2) → -2
         // Ne touche PAS aux fractions (a)/(b) car le / suit la parenthèse fermante
         value = value.replace(/-\((\d+)\)(?!\/)/g, '-$1');
-        value = value.replace(/(?<!\/)\((\d+)\)(?!\/)/g, '$1');
+        value = value.replace(/(?<!\/)\((-?\d+)\)(?!\/)/g, '$1');
 
         // Ensemble solution : {contenu} → \left\{contenu\right\}
         // Doit être EN PREMIER avant les conversions de fractions qui introduisent des {} imbriquées
@@ -2320,6 +2338,7 @@
         // STRATÉGIE 2 : Input text global (id_answer_X)
         // ============================================
         const globalInput = document.querySelector(`input[type="text"][id="id_answer_${fieldIndex}"]`);
+
         if (globalInput) {
             console.log('[Kwyk Tutor] Input text global trouvé:', globalInput.id);
             globalInput.focus();
@@ -2327,6 +2346,21 @@
             globalInput.dispatchEvent(new Event('input', { bubbles: true }));
             globalInput.dispatchEvent(new Event('change', { bubbles: true }));
             highlightElement(globalInput);
+            return true;
+        }
+
+        // ============================================
+        // STRATÉGIE 2b : input[data-kwyk="multifrench"] (exercices figure+panels)
+        // ============================================
+        const multifrenchInputs = document.querySelectorAll('input[data-kwyk="multifrench"]');
+        if (multifrenchInputs.length > 0) {
+            const targetInput = multifrenchInputs[fieldIndex] || multifrenchInputs[0];
+            console.log('[Kwyk Tutor] multifrench input trouvé (index ' + fieldIndex + ')');
+            targetInput.focus();
+            targetInput.value = value;
+            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+            targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+            highlightElement(targetInput);
             return true;
         }
 
@@ -2903,10 +2937,40 @@
             // Analyser les blocs exercise_question
             const blocks = tempDiv.querySelectorAll('.exercise_question');
             const questions = [];
-            blocks.forEach((block, idx) => {
-                const q = analyzeQuestionBlock(block, idx);
-                if (q) questions.push(q);
-            });
+            let figureContext = '';
+
+            // Détecter layout "figure + panels" (exercise_right_panel avec input[data-kwyk="multifrench"])
+            const multifrenchPanels = [...tempDiv.querySelectorAll('.exercise_right_panel')]
+                .filter(p => p.querySelector('input[data-kwyk="multifrench"]'));
+
+            if (multifrenchPanels.length > 0) {
+                // Extraire figureContext depuis le premier .exercise_question (contient la figure géométrique)
+                if (blocks.length > 0) {
+                    const figQ = analyzeQuestionBlock(blocks[0], -1);
+                    figureContext = figQ?.context || '';
+                }
+                // Construire les vraies questions depuis les panels (comme detectFigureExercise)
+                multifrenchPanels.forEach((panel, index) => {
+                    const clone = panel.cloneNode(true);
+                    clone.querySelectorAll('.exercise_buttons, input, .exercise_answer, .exercise_free_correct').forEach(el => el.remove());
+                    clone.querySelectorAll('mjx-container').forEach(container => {
+                        const mathEl = container.querySelector('mjx-assistive-mml math');
+                        if (mathEl) { const t = mathMLToText(mathEl); if (t) { container.replaceWith(document.createTextNode(t)); return; } }
+                        const fallback = container.textContent.trim();
+                        if (fallback) container.replaceWith(document.createTextNode(fallback));
+                    });
+                    const text = clone.textContent.replace(/\s+/g, ' ').trim();
+                    const q = { index, type: 'input', questionType: 'input', label: text.substring(0, 200) || `Question ${index + 1}`, context: text, options: [], inputs: [] };
+                    q.questionType = classifyQuestion(q);
+                    q.answerFormat = classifyAnswerFormat(q);
+                    questions.push(q);
+                });
+            } else {
+                blocks.forEach((block, idx) => {
+                    const q = analyzeQuestionBlock(block, idx);
+                    if (q) questions.push(q);
+                });
+            }
 
             if (questions.length === 0) {
                 document.body.removeChild(tempDiv);
@@ -2916,10 +2980,11 @@
 
             // Construire l'exercice comme detectExercise() le fait
             const exercise = {
-                type: 'multi_question',
+                type: multifrenchPanels.length > 0 ? 'figure_fillin' : 'multi_question',
                 questions: questions,
                 texte: questions.map((q, i) => `Question ${i + 1}: ${q.label}\n${q.context || ''}`).join('\n\n'),
-                exerciseId: exerciseId
+                exerciseId: exerciseId,
+                figureContext: figureContext
             };
             exercise.exerciseType = classifyExercise(exercise.questions, blocks);
 
@@ -2928,6 +2993,9 @@
 
             // Construire le prompt
             let prompt = `Exercice de maths (type détecté: ${exercise.exerciseType}):\n\n`;
+            if (exercise.figureContext) {
+                prompt += `Figure géométrique de l'exercice:\n${exercise.figureContext}\n\n`;
+            }
             exercise.questions.forEach((q, i) => {
                 const promptType = detectPromptType(q);
                 prompt += `Question ${i + 1} [type: ${promptType}]:\n`;
@@ -2946,7 +3014,23 @@
 
             // Déterminer le type de prompt
             const promptType = questions.length > 0 ? detectPromptType(questions[0]) : exercise.exerciseType;
-            const systemPrompt = getSystemPrompt(promptType);
+            const systemPrompt = getSystemPrompt(promptType, questions[0]?.answerFormat || 'input');
+
+            // Tentative de résolution directe (sans IA) — swap temporaire de currentExercise
+            const savedExercise = currentExercise;
+            currentExercise = exercise;
+            const directSolution = tryDirectSolve();
+            currentExercise = savedExercise;
+            if (directSolution) {
+                prefetchCache[exerciseId] = {
+                    solution: directSolution,
+                    exerciseType: exercise.exerciseType,
+                    questions: questions,
+                    exercise: exercise
+                };
+                console.log(`[Kwyk Tutor] Prefetch: résolution directe (sans IA) pour exercice ${exerciseId}`);
+                return;
+            }
 
             // Appel IA
             console.log(`[Kwyk Tutor] Prefetch: appel IA pour exercice ${exerciseId} (type: ${promptType})`);
@@ -4239,13 +4323,14 @@ REGLES STRICTES:
             return true;
         }
 
-        // V14: Tableaux de valeurs/variation/signes maintenant supportés
-        // Seuls les exercices graphiques et drag&drop restent non supportés
+        // Exercices non supportés : constructions géométriques, drag&drop, tableaux de valeurs
         const unsupportedKeywords = [
-            'tracer la courbe',
+            'tracer ',       // constructions graphiques (avec espace, catch-all)
             'placer les points',
             'glisser-déposer',
             'faire glisser',
+            'construire ',   // constructions géométriques (avec espace, catch-all)
+            '[tableau]',     // tableau de valeurs (non supporté — marqueur DOM interne)
         ];
 
         const exerciseText = currentExercise.texte.toLowerCase();
@@ -4350,12 +4435,24 @@ REGLES STRICTES:
 
         if (text.includes('[tableau]')) return 'tableau_valeurs';
 
-        // Type DOM uniquement
-        if (question.type === 'checkbox') return 'qcm_multiple';
-        if (question.type === 'qcm') return 'qcm_simple';
+        // Vecteurs: texte prime sur le DOM (s'applique aussi aux QCM/checkbox)
+        if (text.includes('vecteur') || text.includes('colinéar') ||
+            (text.includes('→') && text.includes('...'))) return 'vecteurs';
+
+        // Fallback : type générique selon le DOM
         if (question.type === 'input') return 'input';
 
         return 'unknown';
+    }
+
+    /**
+     * Retourne le format de réponse attendu (comment remplir), dérivé du DOM.
+     * Distinct du type d'exercice (classifyQuestion).
+     */
+    function classifyAnswerFormat(question) {
+        if (question.type === 'checkbox') return 'qcm_multiple';
+        if (question.type === 'qcm') return 'qcm_simple';
+        return 'input';
     }
 
     /**
@@ -4366,8 +4463,8 @@ REGLES STRICTES:
     function detectPromptType(question) {
         const baseType = question.questionType || 'input';
 
-        // Si c'est déjà un type spécial (tableau, graphique, qcm), garder tel quel
-        if (baseType !== 'input') return baseType;
+        // Si c'est un type d'exercice spécialisé, le garder tel quel
+        if (baseType !== 'input' && baseType !== 'unknown') return baseType;
 
         // Détection inéquations FACTORISÉES (produit ou quotient avec facteurs)
         // Ex: (3x+2)(x-1)>=0, (4x-6)/(-2x+8)<=0, (-5x-4)^2(x+2)^2>0, 6x(x²+5)<=0
@@ -4387,8 +4484,9 @@ REGLES STRICTES:
         const types = new Set();
         questions.forEach((q, i) => {
             q.questionType = classifyQuestion(q);
+            q.answerFormat = classifyAnswerFormat(q);
             types.add(q.questionType);
-            console.log(`[Kwyk Tutor] Q${i + 1} type: ${q.questionType}`);
+            console.log(`[Kwyk Tutor] Q${i + 1} type: ${q.questionType} | format: ${q.answerFormat}`);
         });
 
         // Fallback global si toutes les questions sont unknown
@@ -4398,7 +4496,7 @@ REGLES STRICTES:
             if (globalCheckboxes.length > 0) {
                 if (questions.length > 0 && questions[0].type === 'unknown') {
                     questions[0].type = 'checkbox';
-                    questions[0].questionType = 'qcm_multiple';
+                    questions[0].answerFormat = 'qcm_multiple';
                     globalCheckboxes.forEach(cb => {
                         const label = extractLabelWithMath(cb.labels?.[0] || cb.parentElement);
                         questions[0].options.push({ value: cb.value, label: label, id: cb.id });
@@ -4410,7 +4508,7 @@ REGLES STRICTES:
             if (globalRadios.length > 0) {
                 if (questions.length > 0 && questions[0].type === 'unknown') {
                     questions[0].type = 'qcm';
-                    questions[0].questionType = 'qcm_simple';
+                    questions[0].answerFormat = 'qcm_simple';
                     globalRadios.forEach(radio => {
                         const label = extractLabelWithMath(radio.labels?.[0] || radio.parentElement);
                         questions[0].options.push({ value: radio.value, label: label, id: radio.id });
@@ -4422,7 +4520,7 @@ REGLES STRICTES:
             if (globalInputs.length > 0) {
                 if (questions.length > 0) {
                     questions[0].type = 'input';
-                    questions[0].questionType = 'input';
+                    questions[0].answerFormat = 'input';
                 }
                 return 'input';
             }
@@ -4443,6 +4541,103 @@ REGLES STRICTES:
     // DETECTION EXERCICE - V13 MULTI-QUESTIONS
     // ===========================================
 
+    /**
+     * Détecte les exercices "figure géométrique + fill-in-blank" (exercise_right_panel)
+     * Chaque .exercise_right_panel contient un input[data-kwyk="multifrench"]
+     */
+    function detectFigureExercise(figureBlocks, panels) {
+        const exercise = {
+            type: 'figure_fillin',
+            questions: [],
+            texte: '',
+            code: '',
+            figureContext: ''
+        };
+
+        // Extraire le contexte figure depuis le premier .exercise_question (contient figure-data)
+        if (figureBlocks.length > 0) {
+            const figQ = analyzeQuestionBlock(figureBlocks[0], -1);
+            exercise.figureContext = figQ.context || '';
+        }
+
+        // Créer une question par panel
+        panels.forEach((panel, index) => {
+            const clone = panel.cloneNode(true);
+            // Supprimer buttons, inputs, messages d'alerte, éléments cachés
+            clone.querySelectorAll('.exercise_buttons, input, .exercise_answer, .exercise_free_correct').forEach(el => el.remove());
+
+            // Convertir MathJax en texte lisible
+            clone.querySelectorAll('mjx-container').forEach(container => {
+                const mathEl = container.querySelector('mjx-assistive-mml math');
+                if (mathEl) {
+                    const text = mathMLToText(mathEl);
+                    if (text) { container.replaceWith(document.createTextNode(text)); return; }
+                }
+                const fallback = container.textContent.trim();
+                if (fallback) container.replaceWith(document.createTextNode(fallback));
+            });
+
+            const text = clone.textContent.replace(/\s+/g, ' ').trim();
+            const q = {
+                index:        index,
+                type:         'input',
+                questionType: 'input',
+                label:        text.substring(0, 200) || `Question ${index + 1}`,
+                context:      text,
+                options:      [],
+                inputs:       []
+            };
+            // Détecter le type sémantique (ex: vecteurs si le texte contient "vecteur")
+            q.questionType = classifyQuestion(q);
+            q.answerFormat = classifyAnswerFormat(q);
+            exercise.questions.push(q);
+        });
+
+        if (exercise.questions.length === 0) {
+            console.log('[Kwyk Tutor] detectFigureExercise: aucune question extraite');
+            currentExercise = null;
+            return;
+        }
+
+        exercise.texte = exercise.questions.map((q, i) => `Question ${i + 1}: ${q.label}`).join('\n\n');
+        exercise.exerciseId = extractExerciseIdFromUrl() || hashCode(exercise.texte);
+        exercise.exerciseType = 'input';
+        lastExerciseHash = hashCode(exercise.texte);
+        currentExercise = exercise;
+
+        updatePreview(`${exercise.questions.length} question(s) [figure géométrique]`);
+        checkUnsupportedExercise();
+
+        if (exercise.questions.length > 1) {
+            createQuestionNavigation(exercise.questions.length);
+        } else {
+            document.getElementById('kwyk-question-nav').style.display = 'none';
+        }
+
+        console.log('[Kwyk Tutor] Exercice figure+panels:', currentExercise);
+
+        if (pendingCheatMode && cheatModeActive) {
+            pendingCheatMode = false;
+            if (checkUnsupportedExercise(true)) {
+                console.log('[Kwyk Tutor] Exercice bloqué/non supporté');
+            } else {
+                updateCheatStatus('Chargement...', 'loading');
+                (async () => {
+                    await waitForCondition(() => {
+                        const submitBtn = document.querySelector('button.exercise_submit');
+                        const hasInputs = document.querySelector('input[data-kwyk="multifrench"]');
+                        return submitBtn && !submitBtn.disabled && hasInputs;
+                    }, 8000, 200);
+                    await new Promise(r => setTimeout(r, 1500));
+                    updateCheatStatus('Appel IA en cours...', 'loading');
+                    executeCheatMode();
+                })();
+            }
+        }
+    }
+
+    // ===========================================
+
     function detectExercise() {
         console.log('[Kwyk Tutor] Detection exercice...');
 
@@ -4457,6 +4652,15 @@ REGLES STRICTES:
         }
 
         console.log(`[Kwyk Tutor] ${exerciseBlocks.length} bloc(s) .exercise_question detecte(s)`);
+
+        // Détecter structure "figure + exercise_right_panel" (fill-in-blank avec figure géométrique)
+        const multifrenchPanels = [...document.querySelectorAll('.exercise_right_panel')]
+            .filter(p => p.querySelector('input[data-kwyk="multifrench"]'));
+        if (multifrenchPanels.length > 0) {
+            console.log('[Kwyk Tutor] Structure figure+panels détectée:', multifrenchPanels.length, 'question(s)');
+            detectFigureExercise(exerciseBlocks, multifrenchPanels);
+            return;
+        }
 
         // Structure de l'exercice
         const exercise = {
@@ -4497,6 +4701,7 @@ REGLES STRICTES:
         console.log(`[Kwyk Tutor] Classification V15: ${exercise.exerciseType}`);
 
         currentExercise = exercise;
+        window._kwykGetState; // keep reference live (state reads directly from closure)
         const currentQ = exercise.questions[currentQuestionIndex] || exercise.questions[0];
         updatePreview(`${exercise.questions.length} question(s) détectée(s) [${currentQ?.questionType || exercise.exerciseType}]`);
 
@@ -4525,7 +4730,7 @@ REGLES STRICTES:
                 (async () => {
                     await waitForCondition(() => {
                         const submitBtn = document.querySelector('button.exercise_submit');
-                        const hasInputs = document.querySelector('.exercise_question input, .exercise_question .mq-editable-field, input[id^="id_answer_"]');
+                        const hasInputs = document.querySelector('.exercise_question input, .exercise_question .mq-editable-field, input[id^="id_answer_"], input[data-kwyk="multifrench"]');
                         return submitBtn && !submitBtn.disabled && hasInputs;
                     }, 8000, 200);
                     await new Promise(r => setTimeout(r, 1500));
@@ -4570,7 +4775,7 @@ REGLES STRICTES:
         // On remplace tout le bloc SVG + JSON par un texte lisible "Graphique X : y = ..."
         // V17: Extraction de TOUTES les courbes du plot (pas seulement plot[0])
         //      Nommage via config.label (ex: \mathcal{C}_f → "f") en faisant correspondre les couleurs
-        const graphSpans = clonedBlock.querySelectorAll('span');
+        const graphSpans = clonedBlock.querySelectorAll('span, div.figure-data');
         let graphLetterIndex = 0;
         const graphLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
         graphSpans.forEach(span => {
@@ -4621,12 +4826,110 @@ REGLES STRICTES:
                 } catch(e) {
                     // JSON invalide, on laisse tel quel
                 }
+            } else if (text.includes('"line"') && text.includes('"init"')) {
+                // V18: Format "line" (vecteurs sur quadrillage)
+                // {"init":{...},"line":[[[x1,y1],[x2,y2],{"stroke":"#color","subtype":"vector"}],...],"label":[...]}
+                try {
+                    // Bracket-counting pour extraire le JSON même si du texte (labels) précède
+                    const jsonStart = text.indexOf('{"init"');
+                    if (jsonStart < 0) throw new Error('no JSON');
+                    let depth = 0, jsonEnd = -1;
+                    for (let i = jsonStart; i < text.length; i++) {
+                        if (text[i] === '{') depth++;
+                        else if (text[i] === '}') { depth--; if (depth === 0) { jsonEnd = i; break; } }
+                    }
+                    if (jsonEnd < 0) throw new Error('unclosed JSON');
+                    // Kwyk stocke les labels LaTeX avec un seul backslash (\vec{u}) — invalide JSON strict
+                    // On double les backslashes isolés avant JSON.parse
+                    const rawJson = text.slice(jsonStart, jsonEnd + 1);
+                    const fixedJson = rawJson.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+                    const parsed = JSON.parse(fixedJson);
+                    if (parsed.line && Array.isArray(parsed.line)) {
+                        // Mapping couleur → nom via config.label
+                        const colorToName = {};
+                        if (Array.isArray(parsed.label)) {
+                            parsed.label.forEach(lbl => {
+                                const labelText = String(lbl[1] || '');
+                                const color = (lbl[3] && lbl[3].color) ? lbl[3].color.toLowerCase() : '';
+                                const nameMatch = labelText.match(/\\vec\{(\w+)\}/) ||
+                                                  labelText.match(/\\overrightarrow\{(\w+)\}/);
+                                const name = nameMatch ? nameMatch[1] :
+                                    labelText.replace(/\\/g, '').trim();
+                                if (color && name) colorToName[color] = name;
+                            });
+                        }
+
+                        // Extraire les entrées subtype:"vector"
+                        const vectorLines = [];
+                        parsed.line.forEach((entry) => {
+                            if (!entry[2] || entry[2].subtype !== 'vector') return;
+                            const dx = Math.round((entry[1][0] - entry[0][0]) * 100) / 100;
+                            const dy = Math.round((entry[1][1] - entry[0][1]) * 100) / 100;
+                            const stroke = (entry[2].stroke || '').toLowerCase();
+                            const name = colorToName[stroke] || '?';
+                            vectorLines.push(`[Vecteur ${name}→ : (${dx} ; ${dy})]`);
+                        });
+
+                        if (vectorLines.length > 0) {
+                            span.textContent = '\n' + vectorLines.join('\n') + '\n';
+                            const parent = span.parentElement;
+                            if (parent) {
+                                Array.from(parent.querySelectorAll('span[style*="position"]')).forEach(s => {
+                                    if (s !== span) s.remove();
+                                });
+                            }
+                            graphLetterIndex++;
+                        }
+                    }
+                } catch(e) {
+                    // JSON invalide ou tronqué, on laisse tel quel
+                }
             }
         });
         // Nettoyer les résidus Raphaël (numéros d'axes, "Created with Raphaël X.X.X")
         // S'applique seulement si des graphiques ont été détectés
         if (graphLetterIndex > 0) {
             clonedBlock.querySelectorAll('svg').forEach(svg => svg.remove());
+        }
+
+        // Extraction figure géométrique (div[data-kwyk="figure-data"] avec label + segments)
+        const figureDataEl = clonedBlock.querySelector('[data-kwyk="figure-data"]');
+        if (figureDataEl) {
+            try {
+                const figJson = JSON.parse(figureDataEl.textContent);
+                if (figJson.label && figJson.label.length > 0) {
+                    // Collecter les sommets des VRAIS segments (subtype:"segment") pour recaler les labels
+                    // Les coords du label JSON sont la position du texte, pas toujours le point exact
+                    // (ex: C label à (11;5.75) mais point géométrique réel à l'intersection (10;6))
+                    // IMPORTANT : exclure les traits de graduation (pas de subtype) qui corrompent les coordonnées
+                    const endpoints = [];
+                    if (figJson.line) {
+                        const seen = new Set();
+                        figJson.line.forEach(seg => {
+                            // Ignorer les traits sans subtype (graduations, ticks)
+                            if (!seg[2] || seg[2].subtype !== 'segment') return;
+                            [[seg[0][0], seg[0][1]], [seg[1][0], seg[1][1]]].forEach(([x, y]) => {
+                                const key = `${x},${y}`;
+                                if (!seen.has(key)) { seen.add(key); endpoints.push({x, y}); }
+                            });
+                        });
+                    }
+                    const points = figJson.label.map(lbl => {
+                        let [x, y] = lbl[0];
+                        const name = lbl[1];
+                        // Recaler vers le sommet le plus proche si distance < 2 unités
+                        let nearest = null, nearestDist = Infinity;
+                        endpoints.forEach(ep => {
+                            const d = Math.sqrt((ep.x - x) ** 2 + (ep.y - y) ** 2);
+                            if (d < nearestDist) { nearestDist = d; nearest = ep; }
+                        });
+                        if (nearest && nearestDist < 2) { x = nearest.x; y = nearest.y; }
+                        return `${name}(${x};${y})`;
+                    }).join(', ');
+                    figureDataEl.replaceWith(document.createTextNode(`[Figure géométrique : ${points}]`));
+                    clonedBlock.querySelectorAll('.figure').forEach(f => f.remove());
+                }
+            } catch(e) { /* JSON invalide, laisser tel quel */ }
         }
 
         // Remplacer les éléments MathJax par leur texte DANS le clone
@@ -4843,9 +5146,15 @@ REGLES STRICTES:
      */
     async function solveOneQuestion(question, questionIndex, sharedContext = '') {
         const promptType = detectPromptType(question);
-        const systemPrompt = getSystemPrompt(promptType);
+        const systemPrompt = getSystemPrompt(promptType, question.answerFormat || 'input');
 
         let prompt = `Exercice de maths (type détecté: ${promptType}):\n\n`;
+
+        // Inclure la figure géométrique pour TOUS les index (exercices figure+panels)
+        if (currentExercise?.figureContext) {
+            prompt += `Figure géométrique de l'exercice:\n${currentExercise.figureContext}\n`;
+            prompt += `IMPORTANT: si le résultat d'un calcul correspond aux coordonnées d'un point nommé de la figure, retourner le NOM du point (lettre unique, ex: "K"), pas les coordonnées.\n\n`;
+        }
 
         // Inclure le contexte partagé pour Q2+ (pas Q1 qui est la source du contexte partagé)
         if (sharedContext && questionIndex > 0) {
@@ -4882,9 +5191,12 @@ REGLES STRICTES:
             prompt += `Reponse a saisir\n`;
         }
 
-        console.log(`[Kwyk Tutor] Appel API pour Q${questionIndex + 1} [type: ${qType}]${sharedContext ? ' + contexte partagé' : ''}`);
+        console.log(`[Kwyk Tutor] Appel API pour Q${questionIndex + 1} [type: ${promptType}]${sharedContext ? ' + contexte partagé' : ''}`);
         console.log('[Kwyk Tutor] === SYSTEM PROMPT ===\n' + systemPrompt);
         console.log('[Kwyk Tutor] === USER PROMPT ===\n' + prompt);
+
+        // ── DEBUG: capturer l'échange pour kwykDebug() ──
+        window._kwykLastExchange = { type: promptType, systemPrompt, userPrompt: prompt, rawResponse: null };
 
         const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
             method: 'POST',
@@ -4915,6 +5227,7 @@ REGLES STRICTES:
         if (!content) throw new Error('Réponse vide');
 
         console.log(`[Kwyk Tutor] Réponse brute Q${questionIndex + 1}:`, content);
+        window._kwykLastExchange.rawResponse = content; // ── DEBUG ──
         return parseAIResponse(content);
     }
 
@@ -4963,6 +5276,513 @@ REGLES STRICTES:
         return merged;
     }
 
+    /**
+     * Pour une question "AB→ = ... CD→", calcule le facteur k = AB→ / CD→
+     * directement depuis les coordonnées du figureContext.
+     * Retourne la valeur formatée ("3", "(1)/(3)", etc.) ou null si non applicable.
+     */
+    function tryComputeVectorRatio(questionContext, figureContext) {
+        if (!figureContext) return null;
+        // Pattern: deux noms de points 2 lettres entourant "= ... "
+        const match = questionContext.match(/([A-Z]{2})→\s*=\s*\.+\s*([A-Z]{2})→/);
+        if (!match) return null;
+        const vec1Name = match[1]; // ex: "XY"
+        const vec2Name = match[2]; // ex: "WZ"
+
+        // Parser les coordonnées depuis "[Figure géométrique : W(3;0), X(4;0), ...]"
+        const coords = {};
+        const re = /([A-Z])\(([^;)]+);([^)]+)\)/g;
+        let m;
+        while ((m = re.exec(figureContext)) !== null) {
+            coords[m[1]] = { x: parseFloat(m[2]), y: parseFloat(m[3]) };
+        }
+
+        const [a, b] = [vec1Name[0], vec1Name[1]]; // AB → de A vers B
+        const [c, d] = [vec2Name[0], vec2Name[1]]; // CD → de C vers D
+        if (!coords[a] || !coords[b] || !coords[c] || !coords[d]) return null;
+
+        const v1x = coords[b].x - coords[a].x;
+        const v1y = coords[b].y - coords[a].y;
+        const v2x = coords[d].x - coords[c].x;
+        const v2y = coords[d].y - coords[c].y;
+
+        // Calculer k tel que v1 = k * v2
+        const eps = 1e-9;
+        let k;
+        if (Math.abs(v2x) > eps) {
+            k = v1x / v2x;
+            if (Math.abs(v2y) > eps && Math.abs(v1y - k * v2y) > eps) return null; // non colinéaires
+        } else if (Math.abs(v2y) > eps) {
+            if (Math.abs(v1x) > eps) return null;
+            k = v1y / v2y;
+        } else {
+            return null; // vecteur nul
+        }
+
+        // Réduire k en fraction p/q avec |q| ≤ 100
+        const gcd = (a, b) => b === 0 ? a : gcd(b, Math.abs(a % b));
+        let bestNum = Math.round(k), bestDen = 1, bestErr = Math.abs(k - Math.round(k));
+        for (let den = 2; den <= 100; den++) {
+            const num = Math.round(k * den);
+            const err = Math.abs(k - num / den);
+            if (err < bestErr) { bestErr = err; bestNum = num; bestDen = den; }
+        }
+        if (bestErr > 1e-6) return null;
+        const g = gcd(Math.abs(bestNum), bestDen);
+        bestNum /= g; bestDen /= g;
+
+        if (bestDen === 1) return String(bestNum);
+        if (bestNum < 0) return `-(${-bestNum})/(${bestDen})`;
+        return `(${bestNum})/(${bestDen})`;
+    }
+
+    /**
+     * Tente de résoudre TOUTES les questions d'un exercice colinéarité (sans IA).
+     * Gère deux patterns par question :
+     *   A) AB→ = ... CD→  (ratio inconnu, les deux vecteurs nommés)
+     *   B) AB→ = (p)/(q) ...  ou  AB→ = n ...  (ratio connu, vecteur cible inconnu)
+     * Les deux patterns peuvent coexister dans un même exercice multi-questions.
+     */
+    function tryDirectColinearitySolve() {
+        const exercise = currentExercise;
+        if (!exercise?.questions?.length) return null;
+
+        // Extraire figCtx
+        let figCtx = exercise.figureContext;
+        if (!figCtx && exercise.questions[0]?.context) {
+            const m = exercise.questions[0].context.match(/\[Figure g[eé]om[eé]trique\s*:[^\]]+\]/);
+            if (m) figCtx = m[0];
+        }
+        if (!figCtx) return null;
+
+        // Parser les coordonnées
+        const coords = {};
+        const reCoords = /([A-Z])\(([^;)]+);([^)]+)\)/g;
+        let cm;
+        while ((cm = reCoords.exec(figCtx)) !== null) {
+            coords[cm[1]] = { x: parseFloat(cm[2]), y: parseFloat(cm[3]) };
+        }
+        const pointNames = Object.keys(coords);
+        if (pointNames.length < 2) return null;
+
+        const answers = [];
+        const steps = [];
+
+        for (const q of exercise.questions) {
+            const ctx = q.context || '';
+
+            // Pattern A : AB→ = ... CD→  (ratio inconnu, les deux vecteurs nommés)
+            const mA = ctx.match(/([A-Z]{2})→\s*=\s*\.+\s*([A-Z]{2})→/);
+            if (mA) {
+                const ratio = tryComputeVectorRatio(ctx, figCtx);
+                if (ratio === null) return null;
+                answers.push(ratio);
+                steps.push(`${mA[1]}→ = ${ratio} × ${mA[2]}→`);
+                continue;
+            }
+
+            // Pattern B : AB→ = (p)/(q) ...  ou  AB→ = n ...  (ratio connu, cible inconnue)
+            const mBfrac = ctx.match(/([A-Z]{2})→\s*=\s*\((-?\d+)\)\/\((\d+)\)\s*\.+/);
+            const mBint  = !mBfrac && ctx.match(/([A-Z]{2})→\s*=\s*(-?\d+)\s*\.+/);
+            const mB = mBfrac || mBint;
+            if (mB) {
+                const srcName = mB[1];
+                const p = parseInt(mB[2], 10);
+                const q2 = mBfrac ? parseInt(mBfrac[3], 10) : 1;
+                if (!srcName || q2 === 0 || p === 0) return null;
+
+                const [sa, sb] = [srcName[0], srcName[1]];
+                if (!coords[sa] || !coords[sb]) return null;
+
+                const srcX = coords[sb].x - coords[sa].x;
+                const srcY = coords[sb].y - coords[sa].y;
+                // AB→ = (p/q)·cible  ⟹  cible = (q/p)·AB→
+                const tgtX = (q2 / p) * srcX;
+                const tgtY = (q2 / p) * srcY;
+
+                const eps = 0.01;
+                let found = null;
+                for (const pn of pointNames) {
+                    for (const qn of pointNames) {
+                        if (pn === qn) continue;
+                        const dx = coords[qn].x - coords[pn].x;
+                        const dy = coords[qn].y - coords[pn].y;
+                        if (Math.abs(dx - tgtX) < eps && Math.abs(dy - tgtY) < eps) {
+                            found = `${pn}${qn}→`;
+                            break;
+                        }
+                    }
+                    if (found) break;
+                }
+                if (!found) return null;
+                answers.push(found);
+                steps.push(`${srcName}→=(${srcX};${srcY}), cible=(${tgtX};${tgtY}) → ${found} ✓`);
+                continue;
+            }
+
+            return null; // Aucun pattern reconnu pour cette question
+        }
+
+        if (answers.length === 0) return null;
+        console.log('[Kwyk Tutor] Résolution directe colinéarité (sans IA):', answers);
+        return formatSolution({
+            regle: 'AB→ = k·CD→',
+            etapes: steps,
+            type_exercice: 'vecteurs',
+            reponses: answers.map((a, i) => ({ question: i + 1, type: 'input', reponse: a }))
+        });
+    }
+
+    function tryDirectTranslationSolve() {
+        const exercise = currentExercise;
+        if (!exercise?.questions?.length) return null;
+
+        // Extraire figCtx
+        let figCtx = exercise.figureContext;
+        if (!figCtx && exercise.questions[0]?.context) {
+            const m = exercise.questions[0].context.match(/\[Figure g[eé]om[eé]trique\s*:[^\]]+\]/);
+            if (m) figCtx = m[0];
+        }
+        if (!figCtx) return null;
+
+        // Extraire toutes les coordonnées nommées
+        const coords = {};
+        const re = /([A-Z])\(([^;)]+);([^)]+)\)/g;
+        let cm;
+        while ((cm = re.exec(figCtx)) !== null) {
+            coords[cm[1]] = { x: parseFloat(cm[2]), y: parseFloat(cm[3]) };
+        }
+        if (Object.keys(coords).length === 0) return null;
+
+        function findNamedPoint(x, y) {
+            for (const [name, pt] of Object.entries(coords)) {
+                if (Math.abs(pt.x - x) < 0.01 && Math.abs(pt.y - y) < 0.01) return name;
+            }
+            return null;
+        }
+
+        const answers = [];
+        const steps = [];
+
+        for (const q of exercise.questions) {
+            const ctx = q.context;
+            // Pattern direct : "translation de vecteur XY→ transforme Z en ."
+            const fwd = ctx.match(/translation de vecteur ([A-Z]{2})→ transforme ([A-Z]) en/);
+            // Pattern inverse : "translation de vecteur XY→ transforme en Z."
+            const rev = ctx.match(/translation de vecteur ([A-Z]{2})→ transforme en ([A-Z])[.\s]/);
+
+            if (fwd) {
+                const [, vecName, fromPt] = fwd;
+                const [a, b] = [vecName[0], vecName[1]];
+                if (!coords[a] || !coords[b] || !coords[fromPt]) return null;
+                const vx = coords[b].x - coords[a].x;
+                const vy = coords[b].y - coords[a].y;
+                const result = findNamedPoint(coords[fromPt].x + vx, coords[fromPt].y + vy);
+                if (!result) return null;
+                answers.push(result);
+                steps.push(`${vecName}→=(${vx};${vy}), ${fromPt}+(${vx};${vy})=(${coords[fromPt].x + vx};${coords[fromPt].y + vy})=${result}`);
+            } else if (rev) {
+                const [, vecName, toPt] = rev;
+                const [a, b] = [vecName[0], vecName[1]];
+                if (!coords[a] || !coords[b] || !coords[toPt]) return null;
+                const vx = coords[b].x - coords[a].x;
+                const vy = coords[b].y - coords[a].y;
+                const result = findNamedPoint(coords[toPt].x - vx, coords[toPt].y - vy);
+                if (!result) return null;
+                answers.push(result);
+                steps.push(`${vecName}→=(${vx};${vy}), antécédent=${toPt}-(${vx};${vy})=(${coords[toPt].x - vx};${coords[toPt].y - vy})=${result}`);
+            } else {
+                return null; // Pattern non reconnu → fallback IA
+            }
+        }
+
+        if (answers.length === 0) return null;
+        console.log('[Kwyk Tutor] Résolution directe translation (sans IA):', answers);
+        return formatSolution({
+            regle: 'Translation de vecteur v→ : image = point + v→ (antécédent = image − v→)',
+            etapes: steps,
+            type_exercice: 'vecteurs',
+            reponses: answers.map((a, i) => ({ question: i + 1, type: 'input', reponse: a }))
+        });
+    }
+
+    function tryDirectVectorEqualitySolve() {
+        const exercise = currentExercise;
+        if (!exercise?.questions?.length) return null;
+
+        // Extraire figCtx
+        let figCtx = exercise.figureContext;
+        if (!figCtx && exercise.questions[0]?.context) {
+            const m = exercise.questions[0].context.match(/\[Figure g[eé]om[eé]trique\s*:[^\]]+\]/);
+            if (m) figCtx = m[0];
+        }
+        if (!figCtx) return null;
+
+        // Extraire toutes les coordonnées nommées
+        const coords = {};
+        const re = /([A-Z])\(([^;)]+);([^)]+)\)/g;
+        let cm;
+        while ((cm = re.exec(figCtx)) !== null) {
+            coords[cm[1]] = { x: parseFloat(cm[2]), y: parseFloat(cm[3]) };
+        }
+        const pointNames = Object.keys(coords);
+        if (pointNames.length < 2) return null;
+
+        const answers = [];
+        const steps = [];
+
+        for (const q of exercise.questions) {
+            // Détecter "vecteurs égaux à XY→" (avec → ou \overrightarrow{XY})
+            const m1 = q.context.match(/[eé]gaux [aà]\s*([A-Z]{2})→/);
+            const m2 = q.context.match(/[eé]gaux [aà]\s*\\overrightarrow\{([A-Z]{2})\}/);
+            const match = m1 || m2;
+            if (!match) return null;
+
+            const refName = match[1];
+            const [ra, rb] = [refName[0], refName[1]];
+            if (!coords[ra] || !coords[rb]) return null;
+
+            const refX = coords[rb].x - coords[ra].x;
+            const refY = coords[rb].y - coords[ra].y;
+
+            // Énumérer TOUS les couples ordonnés (X,Y) avec X≠Y
+            const found = [];
+            for (const pn of pointNames) {
+                for (const qn of pointNames) {
+                    if (pn === qn) continue;
+                    if (pn === ra && qn === rb) continue; // exclure le vecteur de référence lui-même
+                    const dx = coords[qn].x - coords[pn].x;
+                    const dy = coords[qn].y - coords[pn].y;
+                    if (Math.abs(dx - refX) < 0.01 && Math.abs(dy - refY) < 0.01) {
+                        found.push(`${pn}${qn}→`);
+                    }
+                }
+            }
+
+            if (found.length === 0) {
+                answers.push('aucun');
+                steps.push(`${refName}→=(${refX};${refY}) — aucun vecteur égal trouvé`);
+            } else {
+                answers.push(found.join(';'));
+                steps.push(`${refName}→=(${refX};${refY})`);
+                found.forEach(v => steps.push(`${v.replace('→','')} → (${refX};${refY}) ✓`));
+            }
+        }
+
+        if (answers.length === 0) return null;
+        console.log('[Kwyk Tutor] Résolution directe vecteurs égaux (sans IA):', answers);
+        return formatSolution({
+            regle: 'Deux vecteurs sont égaux s\'ils ont les mêmes coordonnées (même direction, même sens, même longueur).',
+            etapes: steps,
+            type_exercice: 'vecteurs',
+            reponses: answers.map((a, i) => ({ question: i + 1, type: 'input', reponse: a }))
+        });
+    }
+
+
+    /**
+     * Somme de vecteurs : AB→+CD→+... → vecteur résultant.
+     * Algorithme : chaque AB→ contribue +1 à B et −1 à A.
+     * Le point avec +1 net = arrivée, celui avec −1 net = départ → résultat = départ+arrivée+→
+     */
+    function tryDirectVectorSumSolve() {
+        const exercise = currentExercise;
+        if (!exercise?.questions?.length) return null;
+
+        // Extraire les coordonnées depuis figureContext (pour fallback coordonnées)
+        const figSrc = exercise.figureContext ||
+            (exercise.questions[0]?.context || '').match(/\[Figure géométrique : ([^\]]+)\]/)?.[1] || '';
+        const coords = {};
+        if (figSrc) {
+            const re = /([A-Z])\((-?\d+(?:[.,]\d+)?);(-?\d+(?:[.,]\d+)?)\)/g;
+            let cm;
+            while ((cm = re.exec(figSrc)) !== null) {
+                coords[cm[1]] = { x: parseFloat(cm[2].replace(',', '.')), y: parseFloat(cm[3].replace(',', '.')) };
+            }
+        }
+        const pointNames = Object.keys(coords); // ordre de la figure = ordre de recherche
+
+        const answers = [];
+        const steps = [];
+
+        for (const q of exercise.questions) {
+            const ctx = q.context || '';
+
+            // Détecter une somme : au moins 2 vecteurs séparés par +
+            const sumStr = ctx.match(/[A-Z]{2}→(?:\s*\+\s*[A-Z]{2}→)+/);
+            if (!sumStr) return null;
+
+            const vecs = [...sumStr[0].matchAll(/([A-Z]{2})→/g)].map(m => m[1]);
+            if (vecs.length < 2) return null;
+
+            // --- Approche 1 : count-based (chaîne télescopique — sans coordonnées) ---
+            const counts = {};
+            for (const v of vecs) {
+                counts[v[0]] = (counts[v[0]] || 0) - 1;
+                counts[v[1]] = (counts[v[1]] || 0) + 1;
+            }
+            const positives = Object.entries(counts).filter(([, c]) => c > 0);
+            const negatives = Object.entries(counts).filter(([, c]) => c < 0);
+
+            if (positives.length === 1 && negatives.length === 1) {
+                const depart  = negatives[0][0];
+                const arrivee = positives[0][0];
+                const result  = depart + arrivee + '→';
+                const cancelled = Object.keys(counts).filter(p => counts[p] === 0).join(', ');
+                steps.push(
+                    vecs.map(v => `(${v[1]}−${v[0]})`).join('+') +
+                    ` = ${arrivee}−${depart}` +
+                    (cancelled ? ` (${cancelled} annulés)` : '') +
+                    ` → ${result}`
+                );
+                answers.push(result);
+                continue;
+            }
+
+            // --- Approche 2 : coordonnées (somme non-télescopique) ---
+            if (pointNames.length === 0) return null; // pas de figure → impossible
+
+            let dx = 0, dy = 0;
+            const stepParts = [];
+            let coordsOk = true;
+            for (const v of vecs) {
+                const A = coords[v[0]], B = coords[v[1]];
+                if (!A || !B) { coordsOk = false; break; }
+                const vdx = B.x - A.x, vdy = B.y - A.y;
+                dx += vdx; dy += vdy;
+                stepParts.push(`${v}→=(${vdx};${vdy})`);
+            }
+            if (!coordsOk) return null;
+
+            // Chercher la paire (P,Q) telle que Q−P = (dx,dy), dans l'ordre de la figure
+            let found = null;
+            outer: for (const pn of pointNames) {
+                for (const qn of pointNames) {
+                    if (pn === qn) continue;
+                    const P = coords[pn], Q = coords[qn];
+                    if (Math.abs((Q.x - P.x) - dx) < 0.001 && Math.abs((Q.y - P.y) - dy) < 0.001) {
+                        found = pn + qn + '→';
+                        break outer;
+                    }
+                }
+            }
+            if (!found) return null;
+
+            steps.push(...stepParts, `Somme=(${dx};${dy}) → ${found}`);
+            answers.push(found);
+        }
+
+        if (answers.length === 0) return null;
+        console.log('[Kwyk Tutor] Résolution directe somme vecteurs (sans IA):', answers);
+        return formatSolution({
+            regle: 'Calculer les composantes de chaque vecteur, additionner, identifier la paire correspondante.',
+            etapes: steps,
+            type_exercice: 'vecteurs',
+            reponses: answers.map((a, i) => ({ question: i + 1, type: 'input', reponse: a }))
+        });
+    }
+
+    /**
+     * Solver direct : exprimer un vecteur en combinaison linéaire de deux autres.
+     * Pattern : "exprimer w→ en fonction des vecteurs u→ et v→"
+     * Algorithme : règle de Cramer (système 2×2).
+     */
+    function tryDirectVectorLinearCombinationSolve() {
+        if (!currentExercise?.questions?.length) return null;
+
+        const q = currentExercise.questions.find(q =>
+            /exprimer/i.test(q.context) && /en fonction de/i.test(q.context)
+        );
+        if (!q) return null;
+
+        // Extraire tous les vecteurs nommés du contexte : [Vecteur X→ : (dx ; dy)]
+        const vecPat = /\[Vecteur\s+([^:\u2192\s]+)\u2192\s*:\s*\((-?[\d.]+)\s*;\s*(-?[\d.]+)\)\]/g;
+        const allVecs = {};
+        for (const m of q.context.matchAll(vecPat)) {
+            allVecs[m[1]] = { dx: parseFloat(m[2]), dy: parseFloat(m[3]) };
+        }
+        if (Object.keys(allVecs).length < 3) return null;
+
+        // Identifier vecteur cible et vecteurs de base depuis le texte
+        const exprMatch = q.context.match(
+            /exprimer\s+(?:le\s+vecteur\s+)?([a-zA-Z]+)\u2192\s+en\s+fonction\s+des\s+vecteurs\s+([a-zA-Z]+)\u2192\s+et\s+([a-zA-Z]+)\u2192/i
+        );
+        if (!exprMatch) return null;
+
+        const [, wName, uName, vName] = exprMatch;
+        const W = allVecs[wName], U = allVecs[uName], V = allVecs[vName];
+        if (!W || !U || !V) return null;
+
+        // Cramer : W = a·U + b·V
+        const det = U.dx * V.dy - U.dy * V.dx;
+        if (Math.abs(det) < 0.001) return null; // vecteurs colinéaires
+
+        const aRaw = (W.dx * V.dy - W.dy * V.dx) / det;
+        const bRaw = (U.dx * W.dy - U.dy * W.dx) / det;
+
+        // Convertir en fraction irréductible
+        function toFrac(x) {
+            if (Math.abs(x) < 1e-9) return { n: 0, d: 1 };
+            const sign = x < 0 ? -1 : 1;
+            x = Math.abs(x);
+            for (let d = 1; d <= 100; d++) {
+                const n = Math.round(x * d);
+                if (Math.abs(n / d - x) < 1e-6) {
+                    const g = (function gcd(a, b) { return b ? gcd(b, a % b) : a; })(n, d);
+                    return { n: sign * (n / g), d: d / g };
+                }
+            }
+            return null;
+        }
+
+        const aF = toFrac(aRaw), bF = toFrac(bRaw);
+        if (!aF || !bF) return null;
+
+        // Formater un coefficient devant un vecteur
+        function fmtTerm(name, frac, isFirst) {
+            const { n, d } = frac;
+            if (n === 0) return '';
+            const coeffStr = d === 1
+                ? (Math.abs(n) === 1 ? '' : String(Math.abs(n)))
+                : `(${Math.abs(n)}/${d})`;
+            const sign = n < 0 ? '\u2212' : (isFirst ? '' : '+');
+            return `${sign}${coeffStr}${name}\u2192`;
+        }
+
+        const term1 = fmtTerm(uName, aF, true);
+        const term2 = fmtTerm(vName, bF, !term1);
+        const reponse = (term1 + term2) || '0';
+
+        const steps = [
+            `${wName}\u2192=(${W.dx};${W.dy}), ${uName}\u2192=(${U.dx};${U.dy}), ${vName}\u2192=(${V.dx};${V.dy})`,
+            `Système : ${W.dx}=${U.dx}·a + ${V.dx}·b  et  ${W.dy}=${U.dy}·a + ${V.dy}·b`,
+            `det = ${U.dx}×${V.dy} \u2212 ${U.dy}×${V.dx} = ${det}`,
+            `a = (${W.dx}×${V.dy} \u2212 ${W.dy}×${V.dx}) / ${det} = ${aF.n}${aF.d > 1 ? '/' + aF.d : ''}`,
+            `b = (${U.dx}×${W.dy} \u2212 ${U.dy}×${W.dx}) / ${det} = ${bF.n}${bF.d > 1 ? '/' + bF.d : ''}`,
+            `${wName}\u2192 = ${reponse}`
+        ];
+
+        console.log(`[Kwyk Tutor] Résolution directe combinaison linéaire (sans IA): ${reponse}`);
+        return formatSolution({
+            regle: `Résoudre : ${wName}x = a·${uName}x + b·${vName}x  et  ${wName}y = a·${uName}y + b·${vName}y (règle de Cramer)`,
+            etapes: steps,
+            type_exercice: 'vecteurs',
+            reponses: [{ question: 1, type: 'input', reponse: reponse }]
+        });
+    }
+
+    /** Point d'entrée unique pour tous les solvers directs (sans IA). */
+    function tryDirectSolve() {
+        const wrapped = tryDirectColinearitySolve()
+            || tryDirectTranslationSolve()
+            || tryDirectVectorEqualitySolve()
+            || tryDirectVectorSumSolve()
+            || tryDirectVectorLinearCombinationSolve();
+        if (!wrapped) return null;
+        // formatSolution() retourne { solution: {...} } — unwrap pour usage direct comme cachedSolution
+        return wrapped.solution || wrapped;
+    }
+
     async function solveProblem() {
         if (!config.mistralApiKey) {
             return { error: 'Cle API manquante. Va dans Options pour la configurer.' };
@@ -4979,6 +5799,10 @@ REGLES STRICTES:
         solveProblemHash = lastExerciseHash;
         solveProblemPending = (async () => {
             try {
+                // Tentative de résolution directe (sans IA) : colinéarité puis translation
+                const directSolution = tryDirectSolve();
+                if (directSolution) return directSolution;
+
                 // Si les questions ont des types différents → un appel par question
                 const promptTypes = new Set(currentExercise.questions.map(q => detectPromptType(q)));
                 if (promptTypes.size > 1) {
@@ -5008,7 +5832,7 @@ REGLES STRICTES:
                 const promptType = currentExercise.questions.length > 0
                     ? detectPromptType(currentExercise.questions[0])
                     : exerciseType;
-                const systemPrompt = getSystemPrompt(promptType);
+                const systemPrompt = getSystemPrompt(promptType, currentExercise.questions[0]?.answerFormat || 'input');
                 console.log('[Kwyk Tutor] === SYSTEM PROMPT ===\n' + systemPrompt);
                 console.log('[Kwyk Tutor] === USER PROMPT ===\n' + prompt);
                 const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
@@ -5354,7 +6178,38 @@ Réponse:
 
 EXEMPLE CAS 1 — Énoncé: "Le graphique A : y = 3x + 2 représente une fonction: A) linéaire B) affine C) ni l'une ni l'autre"
 Réponse:
-{"regle": "f(x) = ax + b est affine. Si b = 0, elle est aussi linéaire.", "exemple": {"enonce": "y = 5x : quel type ? A) linéaire B) affine", "etapes": ["y = 5x → b = 0 → linéaire ET affine"]}, "etapes": ["y = 3x + 2 → a = 3, b = 2", "b ≠ 0 → pas linéaire", "Forme ax+b → affine → B"], "reponses": [{"question": 1, "type": "qcm", "reponse": "B"}]}`
+{"regle": "f(x) = ax + b est affine. Si b = 0, elle est aussi linéaire.", "exemple": {"enonce": "y = 5x : quel type ? A) linéaire B) affine", "etapes": ["y = 5x → b = 0 → linéaire ET affine"]}, "etapes": ["y = 3x + 2 → a = 3, b = 2", "b ≠ 0 → pas linéaire", "Forme ax+b → affine → B"], "reponses": [{"question": 1, "type": "qcm", "reponse": "B"}]}`,
+
+            vecteurs: `
+TYPE D'EXERCICE: Vecteurs sur figure géométrique.
+
+Les coordonnées des points sont listées en début de question: [Figure géométrique : A(x;y), B(x;y), ...]
+
+FORMULE: \\overrightarrow{PQ} = Q - P = (Qx - Px ; Qy - Py). ATTENTION: ARRIVÉE moins DÉPART.
+
+Réponds avec ce JSON exact:
+{
+  "regle": "Règle courte (max 120 caractères)",
+  "exemple": {"enonce": "exemple similaire DIFFÉRENT", "etapes": ["calcul 1", "résultat"]},
+  "etapes": ["calcul 1", "calcul 2", "résultat"],
+  "reponses": [{"question": 1, "type": "input", "reponse": "RÉPONSE EXACTE"}]
+}
+
+RÈGLES CRITIQUES:
+1. Pour chaque vecteur à calculer, IDENTIFIER d'abord les coordonnées des deux points dans la liste: "P=(Px;Py), Q=(Qx;Qy)".
+2. \\overrightarrow{PQ} = Q - P = (Qx - Px ; Qy - Py) : ARRIVÉE moins DÉPART.
+3. Pour "vecteurs égaux": calculer le vecteur de référence, puis tester TOUS les couples ordonnés (X,Y) dans LES DEUX SENS — XY→ ET YX→ pour chaque paire. Un vecteur égal peut partir d'un point dont la lettre vient APRÈS la destination (ex: HA→ si H>A alphabétiquement).
+4. Dans "etapes": N'écrire AUCUNE ligne pour les vecteurs non-égaux (même pas ✗). Écrire uniquement: 1) le vecteur de référence avec identification des coordonnées, 2) chaque vecteur égal trouvé (avec ✓), 3) la réponse finale.
+5. "reponse": vecteurs avec "→" séparés par ";". Si aucun: "aucun". Translation → nom du point image.
+6. Pour une somme de vecteurs symbolique (sans coordonnées): développer chaque AB→=B−A, regrouper et simplifier. CRUCIAL pour nommer le résultat: si le résultat vaut X−Y, le vecteur est YX→ (Y=départ, X=arrivée). Ex: résultat=O−J → JO→ (PAS OJ→). Rappel: PQ→=Q−P, donc résultat=Q−P → PQ→.
+
+EXEMPLE 1 — Vecteurs égaux: "Citer tous les vecteurs égaux à IB→. [Figure géométrique : A(0;4), B(4;4), D(0;2), E(4;2), H(4;0), I(8;0)]"
+Réponse:
+{"regle": "Deux vecteurs sont égaux s'ils ont les mêmes coordonnées.", "exemple": {"enonce": "Vecteurs égaux à GD→ avec G(4;0), D(2;2), A(0;4)", "etapes": ["G=(4;0), D=(2;2) → GD→=(2-4;2-0)=(-2;2)", "D=(2;2), A=(0;4) → DA→=(0-2;4-2)=(-2;2) ✓", "DA→"]}, "etapes": ["I=(8;0), B=(4;4) → IB→=(4-8;4-0)=(-4;4)", "H=(4;0), A=(0;4) → HA→=(0-4;4-0)=(-4;4) ✓", "HA→"], "reponses": [{"question": 1, "type": "input", "reponse": "HA→"}]}
+
+EXEMPLE 2 — Somme de vecteurs: "Donner EI→+IQ→+JE→ sous forme d'un seul vecteur."
+Réponse:
+{"regle": "AB→=B−A; simplifier la somme, résultat X−Y → vecteur YX→", "exemple": {"enonce": "AB→+BC→+DA→=?", "etapes": ["(B−A)+(C−B)+(A−D)=C−D", "résultat=C−D → départ=D, arrivée=C → DC→"]}, "etapes": ["(I−E)+(Q−I)+(E−J)", "I−I=0, −E+E=0", "=Q−J", "résultat=Q−J → départ=J, arrivée=Q → JQ→"], "reponses": [{"question": 1, "type": "input", "reponse": "JQ→"}]}`
         };
 
         return typePrompts[exerciseType] || typePrompts['input'];
@@ -5364,17 +6219,29 @@ Réponse:
      * V15: Construit le system prompt modulaire.
      * Combine le prompt de base + le module spécifique au type d'exercice détecté.
      */
-    function getSystemPrompt(exerciseType) {
+    function getSystemPrompt(exerciseType, answerFormat = 'input') {
         if (!exerciseType || exerciseType === 'unknown') {
             exerciseType = 'input';
         }
-        console.log(`[Kwyk Tutor] Prompt modulaire pour type: ${exerciseType}`);
-        return getBasePrompt() + '\n\n' + getTypePrompt(exerciseType);
+        console.log(`[Kwyk Tutor] Prompt modulaire pour type: ${exerciseType} | format: ${answerFormat}`);
+        let prompt = getBasePrompt() + '\n\n' + getTypePrompt(exerciseType);
+        if (answerFormat === 'qcm_simple') {
+            prompt += '\n\nFORMAT RÉPONSE QCM (1 choix): après avoir calculé la réponse, identifie la lettre de l\'option correspondante parmi les options listées. Retourne `"type": "qcm_simple"` et `"reponse": "B"` (lettre seule, ex: A, B, C ou D).';
+        } else if (answerFormat === 'qcm_multiple') {
+            prompt += '\n\nFORMAT RÉPONSE QCM multiple: après avoir calculé les réponses, identifie les lettres des options correctes. Utilise `"type": "qcm_multiples"` et `"reponses": ["A", "C"]` (array de lettres).';
+        }
+        return prompt;
     }
 
     function buildPrompt() {
         const exerciseType = currentExercise?.exerciseType || 'unknown';
         let prompt = `Exercice de maths (type détecté: ${exerciseType}):\n\n`;
+
+        // Inclure la figure géométrique si présente (exercices figure+panels)
+        if (currentExercise.figureContext) {
+            prompt += `Figure géométrique de l'exercice:\n${currentExercise.figureContext}\n`;
+            prompt += `IMPORTANT: si le résultat d'un calcul correspond aux coordonnées d'un point nommé de la figure, retourner le NOM du point (lettre unique, ex: "K"), pas les coordonnées.\n\n`;
+        }
 
         currentExercise.questions.forEach((q, i) => {
             const promptType = detectPromptType(q);
@@ -5786,6 +6653,14 @@ Réponse:
         disableButtons(true);
 
         if (!cachedSolution) {
+            // 0. Solvers directs (priorité max — override tout cache IA)
+            const directSolutionPeda = tryDirectSolve();
+            if (directSolutionPeda) {
+                console.log('[Kwyk Tutor] Résolution directe (péda) — bypass cache');
+                cachedSolution = directSolutionPeda;
+                cachedSolution._exerciseHash = lastExerciseHash;
+                updateStatus('✓ Résolu (instantané)', 'success');
+            } else {
             // Vérifier le prefetch cache d'abord
             const exId = extractExerciseIdFromUrl();
             const prefetched = exId ? getPrefetchedSolution(exId) : null;
@@ -5827,6 +6702,7 @@ Réponse:
 
                 updateStatus('✓ Résolu', 'success');
             }
+            } // fin else (direct solver miss → prefetch / IA)
         }
 
         isLoading = false;
@@ -6412,6 +7288,12 @@ Réponse:
         });
 
         // 2. FRACTIONS
+        // Coefficients fractionnaires en notation (a/b) → fraction HTML directe (sans parens extérieures)
+        // Ex: (7/3)u→ → [frac 7/3]u→  (évite ((7)/(3))u→ avec double parens)
+        result = result.replace(/\((-?\d+)\/(\d+)\)/g,
+            '<span class="kwyk-fraction"><span class="kwyk-frac-num">$1</span><span class="kwyk-frac-den">$2</span></span>'
+        );
+
         // D'abord normaliser les fractions simples a/b en (a)/(b)
         result = result.replace(/(?<!\))(-?\d+)\/(\d+)/g, '($1)/($2)');
 
@@ -6478,6 +7360,99 @@ Réponse:
             if (btn) btn.disabled = disabled;
         });
     }
+
+    // ===========================================
+    // DEBUG HELPER — kwykDebug()
+    // ===========================================
+    // Appeler depuis la console Chrome pour obtenir un snapshot complet.
+    // Nécessite que window._kwykGetState soit disponible (défini au démarrage de l'IIFE).
+
+    window.kwykDebug = function() {
+        const s = window._kwykGetState?.();
+        if (!s) {
+            console.warn('[kwykDebug] Extension non chargée ou _kwykGetState absent');
+            return null;
+        }
+        const ex = s.exercise;
+        const lx = s.exchange;
+
+        console.group('%c[kwykDebug] ══ KWYK TUTOR SNAPSHOT ══', 'color:#7c3aed;font-weight:bold;font-size:13px');
+
+        console.group('📌 Exercice courant');
+        console.log('Type global      :', ex?.exerciseType ?? '—');
+        console.log('Texte extrait    :', ex?.texte?.substring(0, 300) ?? '—');
+        console.log('sharedContext    :', ex?.sharedContext ?? '—');
+        console.log('Nb questions     :', ex?.questions?.length ?? 0);
+        (ex?.questions ?? []).forEach((q, i) => {
+            console.log(
+                `  Q${i + 1}`,
+                '| DOM type:', q.type,
+                '| questionType:', q.questionType,
+                '| context:', (q.context ?? '').substring(0, 150)
+            );
+        });
+        console.groupEnd();
+
+        console.group('🤖 Dernier échange IA');
+        console.log('promptType       :', lx?.type ?? '— (aucun appel depuis chargement)');
+        if (lx?.systemPrompt) {
+            console.log('System prompt    :\n' + lx.systemPrompt);
+            console.log('User prompt      :\n' + lx.userPrompt);
+            console.log('Réponse brute    :\n' + (lx.rawResponse ?? '— (pas encore reçue)'));
+        }
+        console.groupEnd();
+
+        console.group('💾 Cache & Prefetch');
+        console.log('cachedSolution   :', s.cached ?? 'null');
+        console.log('prefetchCache    :', Object.keys(s.prefetch ?? {}).length, 'entrées');
+        console.groupEnd();
+
+        console.group('⚙️ État général');
+        console.log('Mode triche actif:', s.cheatActive);
+        console.groupEnd();
+
+        console.groupEnd();
+        console.log('%c→ Objet retourné pour inspection dans la console', 'color:#6b7280;font-size:11px');
+        return s;
+    };
+    console.log('[Kwyk Tutor] Debug helper prêt → taper kwykDebug() dans la console');
+
+    // Bridge MAIN world : répond aux requêtes de debug venant d'inject.js
+    document.addEventListener('kwyk:debug:request', function() {
+        const s = window._kwykGetState?.();
+        let payload;
+        try {
+            payload = {
+                exercise: s?.exercise ? {
+                    exerciseType: s.exercise.exerciseType,
+                    texte:        s.exercise.texte,
+                    sharedContext: s.exercise.sharedContext,
+                    exerciseId:   s.exercise.exerciseId,
+                    questions: (s.exercise.questions || []).map(q => ({
+                        index:        q.index,
+                        type:         q.type,
+                        questionType: q.questionType,
+                        label:        q.label,
+                        context:      q.context
+                    }))
+                } : null,
+                cached:      s?.cached ?? null,
+                cheatActive: s?.cheatActive ?? false,
+                prefetch:    Object.keys(s?.prefetch || {}),
+                exchange: s?.exchange ? {
+                    type:         s.exchange.type,
+                    systemPrompt: s.exchange.systemPrompt,
+                    userPrompt:   s.exchange.userPrompt,
+                    rawResponse:  s.exchange.rawResponse
+                } : null
+            };
+        } catch (e) {
+            payload = { error: 'Sérialisation échouée : ' + e.message };
+        }
+        document.dispatchEvent(new CustomEvent('kwyk:debug:response', {
+            detail: JSON.stringify(payload)
+        }));
+    });
 
     // ===========================================
     // START

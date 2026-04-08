@@ -1265,3 +1265,20 @@ body.kwyk-side-left #kwyk-blocked-popup {
   margin-top: 8px;
 }
 
+/* Notation vectorielle : flèche au-dessus des lettres */
+.kwyk-vec {
+  position: relative;
+  display: inline-block;
+}
+.kwyk-vec::before {
+  content: '→';
+  position: absolute;
+  top: -0.6em;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.65em;
+  line-height: 1;
+  pointer-events: none;
+}
+

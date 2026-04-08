@@ -93,4 +93,61 @@
 
     // Signaler que le script est prêt
     window.postMessage({ type: 'KWYK_TUTOR_INJECT_READY' }, '*');
+
+    // kwykDebug() — accessible depuis la console Chrome (monde MAIN)
+    window.kwykDebug = function() {
+        let result = null;
+        document.addEventListener('kwyk:debug:response', function(e) {
+            result = JSON.parse(e.detail);
+        }, { once: true });
+        document.dispatchEvent(new CustomEvent('kwyk:debug:request'));
+
+        if (!result) {
+            console.warn('[kwykDebug] Pas de réponse — extension non chargée ou pas sur une page Kwyk ?');
+            return null;
+        }
+
+        const ex = result.exercise;
+        const lx = result.exchange;
+
+        console.group('%c[kwykDebug] ══ KWYK TUTOR SNAPSHOT ══', 'color:#7c3aed;font-weight:bold;font-size:13px');
+
+        console.group('📌 Exercice courant');
+        console.log('Type global      :', ex?.exerciseType ?? '—');
+        console.log('Texte extrait    :', ex?.texte?.substring(0, 300) ?? '—');
+        console.log('sharedContext    :', ex?.sharedContext ?? '—');
+        console.log('Nb questions     :', ex?.questions?.length ?? 0);
+        (ex?.questions ?? []).forEach((q, i) => {
+            console.log(
+                `  Q${i + 1}`,
+                '| DOM type:', q.type,
+                '| questionType:', q.questionType,
+                '| answerFormat:', q.answerFormat || '?',
+                '| context:', (q.context ?? '').substring(0, 150)
+            );
+        });
+        console.groupEnd();
+
+        console.group('🤖 Dernier échange IA');
+        console.log('promptType       :', lx?.type ?? '— (aucun appel depuis chargement)');
+        if (lx?.systemPrompt) {
+            console.log('System prompt    :\n' + lx.systemPrompt);
+            console.log('User prompt      :\n' + lx.userPrompt);
+            console.log('Réponse brute    :\n' + (lx.rawResponse ?? '— (pas encore reçue)'));
+        }
+        console.groupEnd();
+
+        console.group('💾 Cache & Prefetch');
+        console.log('cachedSolution   :', result.cached ?? 'null');
+        console.log('prefetchCache    :', result.prefetch?.length ?? 0, 'entrées');
+        console.groupEnd();
+
+        console.group('⚙️ État général');
+        console.log('Mode triche actif:', result.cheatActive);
+        console.groupEnd();
+
+        console.groupEnd();
+        console.log('%c→ Objet retourné pour inspection dans la console', 'color:#6b7280;font-size:11px');
+        return result;
+    };
 })();
