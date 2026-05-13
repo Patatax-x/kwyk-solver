@@ -1,17 +1,11 @@
 /**
- * Kwyk Tutor - Options Script
- * ===========================
+ * Kwyk Tutor - Options Script (Firefox)
+ * ======================================
  * Gère la page d'options de l'extension
+ * Version Firefox : sans gestion utilisateur
  */
 
-const USERS_GIST_ID = 'b2ab6441fd1de494a4c3b33af765dcac';
-let GIST_TOKEN = '';  // Chargé depuis chrome.storage.local (mis en cache par content.js)
-
 document.addEventListener('DOMContentLoaded', () => {
-    // Charger le token Gist depuis le cache local
-    chrome.storage.local.get('kwykGistToken', (result) => {
-        if (result.kwykGistToken) GIST_TOKEN = result.kwykGistToken;
-    });
     // Elements DOM
     const apiKeyInput = document.getElementById('api-key');
     const modelSelect = document.getElementById('model');
@@ -33,14 +27,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const optSideLeft = document.getElementById('opt-side-left');
     const optSideRight = document.getElementById('opt-side-right');
 
-    // Elements profil
-    const userPseudoInput = document.getElementById('user-pseudo');
-    const userIdInput = document.getElementById('user-id');
-    const pseudoHint = document.getElementById('pseudo-hint');
+    // Elements raccourci
+    const shortcutInput = document.getElementById('shortcut-input');
+    const btnResetShortcut = document.getElementById('btn-reset-shortcut');
+    const btnHelp = document.getElementById('btn-help');
+    const helpHint = document.getElementById('help-hint');
 
     // Charger la configuration existante
     loadConfig();
-    loadUserProfile();
 
     // Evenements
     optPedagogique.addEventListener('click', () => selectMode('pedagogique'));
@@ -62,130 +56,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    /**
-     * Charge le profil utilisateur depuis le storage local
-     */
-    function loadUserProfile() {
-        chrome.storage.local.get(['kwykUserId', 'kwykUserPseudo'], async (result) => {
-            // UUID
-            if (result.kwykUserId) {
-                userIdInput.value = result.kwykUserId;
-            } else {
-                const newId = crypto.randomUUID();
-                chrome.storage.local.set({ kwykUserId: newId });
-                userIdInput.value = newId;
-            }
+    // Capture du raccourci clavier
+    shortcutInput.addEventListener('keydown', (e) => {
+        e.preventDefault();
+        const parts = [];
+        if (e.ctrlKey) parts.push('ctrl');
+        if (e.altKey) parts.push('alt');
+        if (e.shiftKey) parts.push('shift');
+        const key = e.key === ' ' ? 'space' : e.key.toLowerCase();
+        if (!['control', 'alt', 'shift', 'meta'].includes(key)) {
+            parts.push(key);
+        }
+        if (parts.length >= 2) {
+            const shortcut = parts.join('+');
+            shortcutInput.value = formatShortcutDisplay(shortcut);
+            shortcutInput.dataset.shortcut = shortcut;
+        }
+    });
+    btnResetShortcut.addEventListener('click', () => {
+        shortcutInput.value = formatShortcutDisplay('ctrl+enter');
+        shortcutInput.dataset.shortcut = 'ctrl+enter';
+    });
 
-            // Pseudo
-            if (result.kwykUserPseudo) {
-                userPseudoInput.value = result.kwykUserPseudo;
-            }
-
-            // Vérifier si le pseudo est verrouillé par l'admin
-            await checkPseudoLock(userIdInput.value);
+    // Bouton aide → copie email
+    if (btnHelp) {
+        btnHelp.addEventListener('click', () => {
+            navigator.clipboard.writeText('patatax.contact@gmail.com').then(() => {
+                btnHelp.textContent = '✓ Email copié !';
+                setTimeout(() => { btnHelp.textContent = '❓ Copier l\'email du support'; }, 2000);
+            });
         });
-    }
-
-    /**
-     * Vérifie si le pseudo est verrouillé par l'admin
-     */
-    async function checkPseudoLock(userId) {
-        try {
-            const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                headers: { 'Authorization': `token ${GIST_TOKEN}` }
-            });
-            if (!response.ok) return;
-
-            const gist = await response.json();
-            const file = gist.files['kwyk-users.json'];
-            if (!file) return;
-
-            let usersData;
-            try {
-                usersData = JSON.parse(file.content);
-            } catch (e) {
-                console.error('[Kwyk Tutor] JSON corrompu dans Gist users:', e);
-                return;
-            }
-            const userData = usersData[userId];
-
-            if (userData) {
-                // Si l'admin a renommé, mettre à jour
-                if (userData.name && userData.name !== userPseudoInput.value) {
-                    userPseudoInput.value = userData.name;
-                    chrome.storage.local.set({ kwykUserPseudo: userData.name });
-                }
-
-                // Si verrouillé, désactiver le champ
-                if (userData.locked) {
-                    userPseudoInput.disabled = true;
-                    userPseudoInput.style.background = '#f8f9fa';
-                    userPseudoInput.style.color = '#6c757d';
-                    pseudoHint.textContent = 'Pseudo verrouillé par l\'administrateur.';
-                    pseudoHint.style.color = '#dc3545';
-                }
-            }
-        } catch (error) {
-            console.error('[Kwyk Tutor] Erreur vérification pseudo lock:', error);
-        }
-    }
-
-    /**
-     * Enregistre le pseudo dans le Gist
-     */
-    async function registerPseudo(pseudo, userId) {
-        try {
-            const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                headers: { 'Authorization': `token ${GIST_TOKEN}` }
-            });
-            if (!response.ok) return false;
-
-            const gist = await response.json();
-            const file = gist.files['kwyk-users.json'];
-            let usersData = {};
-            if (file) {
-                try {
-                    usersData = JSON.parse(file.content);
-                } catch (e) {
-                    console.error('[Kwyk Tutor] JSON corrompu dans Gist users:', e);
-                }
-            }
-
-            const existing = usersData[userId] || {};
-            usersData[userId] = {
-                name: pseudo,
-                enabled: existing.enabled !== undefined ? existing.enabled : true,
-                locked: existing.locked || false,
-                lastSeen: new Date().toISOString()
-            };
-
-            const writeResponse = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                method: 'PATCH',
-                headers: {
-                    'Authorization': `token ${GIST_TOKEN}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    files: {
-                        'kwyk-users.json': {
-                            content: JSON.stringify(usersData, null, 2)
-                        }
-                    }
-                })
-            });
-
-            return writeResponse.ok;
-        } catch (error) {
-            console.error('[Kwyk Tutor] Erreur enregistrement pseudo:', error);
-            return false;
-        }
     }
 
     /**
      * Charge la configuration depuis le storage
      */
     function loadConfig() {
-        chrome.storage.sync.get(['mistralApiKey', 'model', 'mode', 'cheatAutoValidate', 'cheatAutoNext', 'panelSide'], (result) => {
+        chrome.storage.sync.get(['mistralApiKey', 'model', 'mode', 'cheatAutoValidate', 'cheatAutoNext', 'panelSide', 'panelShortcut'], (result) => {
             if (result.mistralApiKey) {
                 apiKeyInput.value = result.mistralApiKey;
             }
@@ -211,7 +118,25 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 selectSide('right');
             }
+            // Charger le raccourci
+            const shortcut = result.panelShortcut || 'ctrl+enter';
+            shortcutInput.value = formatShortcutDisplay(shortcut);
+            shortcutInput.dataset.shortcut = shortcut;
         });
+    }
+
+    /**
+     * Formate un raccourci pour affichage lisible
+     */
+    function formatShortcutDisplay(shortcut) {
+        return shortcut.split('+').map(k => {
+            if (k === 'ctrl') return 'Ctrl';
+            if (k === 'alt') return 'Alt';
+            if (k === 'shift') return 'Shift';
+            if (k === 'enter') return 'Entrée';
+            if (k === 'space') return 'Espace';
+            return k.toUpperCase();
+        }).join(' + ');
     }
 
     /**
@@ -318,23 +243,15 @@ document.addEventListener('DOMContentLoaded', () => {
     /**
      * Sauvegarde la configuration
      */
-    async function saveConfig() {
-        const pseudo = userPseudoInput.value.trim();
-        const currentUserId = userIdInput.value;
-
-        // Sauvegarder le pseudo si modifié et non verrouillé
-        if (pseudo && !userPseudoInput.disabled) {
-            chrome.storage.local.set({ kwykUserPseudo: pseudo });
-            await registerPseudo(pseudo, currentUserId);
-        }
-
+    function saveConfig() {
         const config = {
             mistralApiKey: apiKeyInput.value.trim(),
             model: modelSelect.value,
             mode: getSelectedMode(),
             cheatAutoValidate: cheatAutoValidate.checked,
             cheatAutoNext: cheatAutoNext.checked,
-            panelSide: getSelectedSide()
+            panelSide: getSelectedSide(),
+            panelShortcut: shortcutInput.dataset.shortcut || 'ctrl+enter'
         };
 
         // Validation
@@ -364,6 +281,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 cheatAutoValidate.checked = false;
                 cheatAutoNext.checked = false;
                 cheatAutoNext.disabled = true;
+                // Reset raccourci
+                shortcutInput.value = formatShortcutDisplay('ctrl+enter');
+                shortcutInput.dataset.shortcut = 'ctrl+enter';
                 showToast('Configuration réinitialisée', 'success');
             });
         }

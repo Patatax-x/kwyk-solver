@@ -71,4 +71,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function openOptions() {
         chrome.runtime.openOptionsPage();
     }
+
+    // Bouton "Besoin d'aide" → copie l'email support
+    const linkHelp = document.getElementById('link-help');
+    if (linkHelp) {
+        linkHelp.addEventListener('click', (e) => {
+            e.preventDefault();
+            navigator.clipboard.writeText('patatax.contact@gmail.com').then(() => {
+                linkHelp.textContent = '✓ Email copié !';
+                setTimeout(() => { linkHelp.textContent = 'Besoin d\'aide ?'; }, 2000);
+            });
+        });
+    }
 });

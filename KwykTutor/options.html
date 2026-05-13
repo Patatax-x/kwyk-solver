@@ -306,44 +306,22 @@
     <div class="container">
         <div class="header">
             <h1>Kwyk Tutor - Options</h1>
-            <p>Configure ton assistant pédagogique</p>
-        </div>
-
-        <!-- Profil utilisateur -->
-        <div class="card">
-            <h2>Profil</h2>
-
-            <div class="form-group">
-                <label for="user-pseudo">Pseudo</label>
-                <input type="text" id="user-pseudo" placeholder="Ton pseudo...">
-                <p class="hint" id="pseudo-hint">Ce pseudo est visible par l'administrateur.</p>
-            </div>
-
-            <div class="form-group">
-                <label>Identifiant unique</label>
-                <input type="text" id="user-id" readonly style="background: #f8f9fa; color: #6c757d; cursor: default;">
-                <p class="hint">Identifiant généré automatiquement. Non modifiable.</p>
-            </div>
+            <p>Assistant pédagogique pour la plateforme de mathématiques kwyk.fr</p>
         </div>
 
         <!-- Configuration API -->
         <div class="card">
-            <h2>Configuration API Mistral</h2>
+            <h2>Configuration IA</h2>
 
-            <div class="info-box">
-                <h4>Comment obtenir une clé API ?</h4>
-                <ol>
-                    <li>Va sur <a href="https://console.mistral.ai/" target="_blank">console.mistral.ai</a></li>
-                    <li>Crée un compte gratuit</li>
-                    <li>Va dans "API Keys"</li>
-                    <li>Crée une nouvelle clé et copie-la ici</li>
-                </ol>
+            <div class="info-box" style="background: #e8f5e9; margin-bottom: 15px;">
+                <h4 style="color: #2e7d32;">💡 Clé API IA gratuite</h4>
+                <p style="color: #388e3c;">Utilise le service IA de ton choix. <strong>Mistral AI est recommandé : gratuit</strong> sur <a href="https://console.mistral.ai/" target="_blank" style="color: #1b5e20;">console.mistral.ai</a>. Crée un compte, va dans "API Keys" et génère une nouvelle clé.</p>
             </div>
 
             <div class="form-group">
-                <label for="api-key">Clé API Mistral</label>
-                <input type="password" id="api-key" placeholder="sk-xxxxxxxxxxxxxxxx">
-                <p class="hint">Ta clé reste stockée localement dans ton navigateur, jamais envoyée ailleurs.</p>
+                <label for="api-key">Clé API IA</label>
+                <input type="password" id="api-key" placeholder="Colle ta clé API ici...">
+                <p class="hint">Ta clé reste stockée localement dans ton navigateur, jamais transmise au développeur. Mistral AI recommandé si tu n'en as pas encore.</p>
             </div>
 
             <div class="form-group">
@@ -374,7 +352,7 @@
                 </label>
                 <label class="mode-option" id="opt-triche">
                     <input type="radio" name="mode" value="triche">
-                    <h4>Triche</h4>
+                    <h4>Troll</h4>
                     <p>Remplit auto les réponses.</p>
                 </label>
                 <label class="mode-option" id="opt-revision">
@@ -385,9 +363,9 @@
             </div>
         </div>
 
-        <!-- Options Mode Triche -->
+        <!-- Options Mode Troll -->
         <div class="card" id="cheat-options-card" style="display: none;">
-            <h2>Options Mode Triche</h2>
+            <h2>Options Mode Troll</h2>
 
             <div class="form-group">
                 <label class="checkbox-label">
@@ -407,9 +385,17 @@
                 <p class="hint">Clique automatiquement sur "Suivant" après validation. Nécessite l'auto-validation.</p>
             </div>
 
-            <div class="info-box" style="background: #fff3e0;">
-                <h4 style="color: #e65100;">Attention</h4>
-                <p style="color: #f57c00;">Ces options automatisent complètement le processus. Utilise-les avec précaution !</p>
+            <div class="info-box" style="background: #ffebee; border: 2px solid #ef5350;">
+                <h4 style="color: #c62828;">⚠️ Avertissement important</h4>
+                <p style="color: #b71c1c; margin-bottom: 8px;">
+                    Le mode Troll a pour objectif de <strong>démontrer la fiabilité de l'IA</strong> intégrée à l'extension.
+                    Avant de faire confiance aux explications pédagogiques, tu peux vérifier que les réponses générées sont correctes.
+                </p>
+                <p style="color: #b71c1c; font-weight: 600;">
+                    L'utilisation de ce mode lors d'une évaluation notée, contrôle, examen ou devoir surveillé constitue
+                    une violation des règles scolaires et des CGU de la plateforme. Toute conséquence (sanction disciplinaire,
+                    désactivation du compte) est sous ta seule responsabilité.
+                </p>
             </div>
         </div>
 
@@ -427,6 +413,39 @@
                     <h4>Droite ▶</h4>
                     <p>Bouton et panneau en bas à droite.</p>
                 </label>
+            </div>
+        </div>
+
+        <!-- Raccourci clavier -->
+        <div class="card">
+            <h2>Raccourci clavier</h2>
+            <div class="form-group">
+                <label for="shortcut-input">Ouvrir / fermer le panel</label>
+                <input type="text" id="shortcut-input" placeholder="Cliquer ici puis appuyer sur la combinaison..." readonly style="cursor: pointer; background: #f8f9fa;">
+                <p class="hint">Par défaut : <strong>Ctrl + Entrée</strong>. Cliquer sur le champ puis appuyer sur la combinaison souhaitée.</p>
+            </div>
+            <button class="btn btn-secondary" id="btn-reset-shortcut" style="font-size: 12px; padding: 6px 14px;">Réinitialiser le raccourci</button>
+        </div>
+
+        <!-- Besoin d'aide -->
+        <div class="card" style="text-align: center; padding: 20px 30px;">
+            <p style="font-size: 14px; color: #6c757d; margin-bottom: 12px;">Un problème ou une question ?</p>
+            <button class="btn btn-secondary" id="btn-help" style="width: 100%;">❓ Copier l'email du support</button>
+        </div>
+
+        <!-- Mentions légales -->
+        <div class="card">
+            <h2>Mentions légales</h2>
+            <p style="font-size: 14px; color: #6c757d; margin-bottom: 12px;">
+                Kwyk Tutor est un assistant <strong>pédagogique</strong> indépendant, non affilié à Kwyk SAS.
+                L'extension ne collecte aucune donnée personnelle.
+            </p>
+            <p style="font-size: 14px; color: #6c757d; margin-bottom: 16px;">
+                L'utilisateur est seul responsable du respect des règles de la plateforme et de son établissement scolaire.
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <a href="https://patatax-formulaire.notion.site/Conditions-d-Utilisation-Kwyk-Tutor-35cc3ccd8936818f8306d0374eaaf9d6" target="_blank" style="color: #667eea; text-decoration: none; font-size: 14px;">📜 Conditions d'utilisation</a>
+                <a href="https://patatax-formulaire.notion.site/Politique-de-Confidentialit-Kwyk-Tutor-35cc3ccd89368192a4a0de5db53f6db5" target="_blank" style="color: #667eea; text-decoration: none; font-size: 14px;">🔒 Politique de confidentialité</a>
             </div>
         </div>
 

@@ -1,3 +1,9 @@
+﻿/**
+ * Copyright © 2025 Patatax. Tous droits réservés.
+ * Toute reproduction, modification ou distribution sans autorisation écrite est interdite.
+ * Ce code est protégé par le droit d'auteur français et les conventions internationales.
+ */
+
 /**
  * Kwyk Tutor - Version 16 (V16)
  * =============================
@@ -89,7 +95,129 @@
 (function() {
     'use strict';
 
-    console.log('[Kwyk Tutor] === Démarrage V16 - Multi-questions & Tableaux améliorés ===');
+    // Système de logs à niveaux — debug masqué en production (config.debugMode)
+    const LOG = {
+        info:  (msg, ...a) => console.log(`[KT] ${msg}`, ...a),
+        warn:  (msg, ...a) => console.warn(`[KT ⚠] ${msg}`, ...a),
+        error: (msg, ...a) => console.error(`[KT ✗] ${msg}`, ...a),
+        debug: (msg, ...a) => { if (config.debugMode) console.log(`[KT·] ${msg}`, ...a); },
+    };
+
+    /**
+     * Telemetry locale (stats compteurs dans localStorage).
+     * Lecture via kwykDebug() ou directement: localStorage.getItem('kwyk_telemetry_v1')
+     */
+    const TELEMETRY_KEY = 'kwyk_telemetry_v1';
+    const Telemetry = {
+        load() {
+            try { return JSON.parse(localStorage.getItem(TELEMETRY_KEY)) || {}; }
+            catch { return {}; }
+        },
+        save(data) { try { localStorage.setItem(TELEMETRY_KEY, JSON.stringify(data)); } catch {} },
+        incr(field) {
+            const t = this.load();
+            t[field] = (t[field] || 0) + 1;
+            t.lastUpdate = new Date().toISOString();
+            this.save(t);
+        },
+        reset() { try { localStorage.removeItem(TELEMETRY_KEY); } catch {} }
+    };
+
+    /**
+     * Rate limiter client-side pour les appels Mistral.
+     * Max N appels par seconde glissante, queue sinon.
+     */
+    const RATE_LIMIT = { maxPerSec: 4, recent: [], backoffUntil: 0 };
+    async function rateLimitGate() {
+        // Backoff actif après 429/403 reçu
+        const now0 = Date.now();
+        if (RATE_LIMIT.backoffUntil > now0) {
+            const wait = RATE_LIMIT.backoffUntil - now0;
+            LOG.debug(`Rate limit backoff: attente ${wait}ms`);
+            await new Promise(r => setTimeout(r, wait));
+        }
+        const now = Date.now();
+        RATE_LIMIT.recent = RATE_LIMIT.recent.filter(t => now - t < 1000);
+        if (RATE_LIMIT.recent.length >= RATE_LIMIT.maxPerSec) {
+            const wait = 1000 - (now - RATE_LIMIT.recent[0]) + 50;
+            LOG.debug(`Rate limit: attente ${wait}ms (${RATE_LIMIT.recent.length} calls/s)`);
+            await new Promise(r => setTimeout(r, wait));
+            return rateLimitGate();
+        }
+        RATE_LIMIT.recent.push(now);
+    }
+    // Set backoff après 429/403 — honore Retry-After header sinon défaut 30s
+    function applyRateLimitBackoff(response) {
+        const retryAfter = parseInt(response.headers.get('Retry-After') || '0', 10);
+        const waitMs = (retryAfter > 0 ? retryAfter : 30) * 1000;
+        RATE_LIMIT.backoffUntil = Date.now() + waitMs;
+        LOG.warn(`Mistral ${response.status} → backoff ${waitMs / 1000}s`);
+    }
+
+    // Valeurs invalides pour auto-fill (refusées par toutes les fonctions autoFill*)
+    const INVALID_VALUES = ['', 'null', 'undefined', 'nan', 'ignore', 'auto'];
+    function isInvalidAnswer(value) {
+        const trimmed = (value ?? '').toString().trim();
+        if (!trimmed) return true;
+        return INVALID_VALUES.includes(trimmed.toLowerCase());
+    }
+
+    /**
+     * Vérifie qu'une solution IA contient au moins une réponse non-vide.
+     * Utilisée pour le retry automatique en cas de réponse vide.
+     */
+    function isValidSolution(solution) {
+        return !!solution?.reponses?.some(r =>
+            (r.reponse && r.reponse.trim() !== '') ||
+            (r.reponses && r.reponses.length > 0)
+        );
+    }
+
+    /**
+     * fetch() avec timeout configurable. Combine un signal externe optionnel
+     * avec un AbortController interne qui déclenche après timeoutMs.
+     * Évite les requêtes Mistral qui pendent indéfiniment.
+     */
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+        const isMistral = url.includes('api.mistral.ai');
+        // Rate limit pour Mistral uniquement (évite 429)
+        if (isMistral) {
+            await rateLimitGate();
+            Telemetry.incr('apiCalls');
+        }
+
+        const timeoutCtrl = new AbortController();
+        const timeoutId = setTimeout(() => timeoutCtrl.abort(new Error(`Timeout ${timeoutMs}ms`)), timeoutMs);
+
+        // Combiner signal externe (ex: cheatAbortController) + signal timeout
+        const externalSignal = options.signal;
+        const onExternalAbort = () => timeoutCtrl.abort(externalSignal?.reason);
+        if (externalSignal) {
+            if (externalSignal.aborted) timeoutCtrl.abort(externalSignal.reason);
+            else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+        }
+
+        try {
+            const res = await fetch(url, { ...options, signal: timeoutCtrl.signal });
+            if (isMistral) {
+                if (res.ok) Telemetry.incr('apiSuccesses');
+                else {
+                    Telemetry.incr('apiHttpErrors');
+                    if (res.status === 429 || res.status === 403) applyRateLimitBackoff(res);
+                }
+            }
+            return res;
+        } catch (err) {
+            if (isMistral) {
+                if (timeoutCtrl.signal.aborted && !externalSignal?.aborted) Telemetry.incr('apiTimeouts');
+                else Telemetry.incr('apiErrors');
+            }
+            throw err;
+        } finally {
+            clearTimeout(timeoutId);
+            if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+        }
+    }
 
     // Config
     let config = {
@@ -98,12 +226,13 @@
         mode: 'pedagogique',  // 'pedagogique', 'triche' ou 'revision'
         cheatAutoValidate: false,
         cheatAutoNext: false,
-        sounds: true,  // V12: Notifications sonores
-        theme: 'light', // V12: Thème (light/dark)
-        panelSide: null  // 'left' ou 'right' — null = pas encore choisi
+        sounds: true,   // Notifications sonores
+        theme: 'light', // Thème (light/dark)
+        panelSide: null, // 'left' ou 'right' — null = pas encore choisi
+        debugMode: false // true = affiche LOG.debug dans la console
     };
 
-    // V12: Notification sonore (beep)
+    // Notification sonore (beep)
     function playBeep(type = 'success') {
         if (!config.sounds) return;
 
@@ -128,7 +257,7 @@
                 ctx.close();
             }, 150);
         } catch (e) {
-            console.log('[Kwyk Tutor] Audio non supporté');
+            LOG.debug('Audio non supporté');
         }
     }
 
@@ -148,6 +277,7 @@
     let isLoading = false;
     let lastExerciseHash = '';
     let currentQuestionIndex = 0; // Pour la navigation
+    let panelUserClosed = false;  // true si l'utilisateur a fermé le panel manuellement (empêche rouvrir auto)
     let cheatModeActive = false; // État du switch ON/OFF (toujours OFF au démarrage)
     let pendingCheatMode = false; // Si le mode triche a été activé avant détection d'exercice
     let cheatExecutionId = 0; // ID unique pour chaque exécution du mode triche (évite les races)
@@ -160,721 +290,51 @@
     let prefetchInProgress = false; // Verrou pour éviter les lancements multiples
     let prefetchAbortController = null; // Pour annuler le prefetch en cours
 
-    // ===========================================
-    // CONTRÔLE À DISTANCE (blocage par plages horaires)
-    // ===========================================
 
-    const GIST_RAW_URL = 'https://gist.githubusercontent.com/Patatax-x/41704ea544bc0e2531d20a0d9c9d592e/raw/kwyk-config.json';
-    const LOCAL_VERSION = '18.0.0';
-
-    // Gist utilisateurs (lecture + écriture)
-    const USERS_GIST_ID = 'b2ab6441fd1de494a4c3b33af765dcac';
-    let gistToken = '';  // Chargé depuis kwyk-config.json (jamais hardcodé)
+    // ===========================================
+    // CONTRÔLE À DISTANCE (désactivé dans la version Firefox)
+    // ===========================================
 
     let extensionBlocked = false;   // true si une plage de blocage est active
     let blockedMessage = '';        // Message à afficher quand bloqué
-    let userBlocked = false;        // true si l'utilisateur est désactivé par l'admin
-    let userPseudo = '';            // Pseudo de l'utilisateur
-    let userId = '';                // UUID de l'utilisateur
-    let userPseudoLocked = false;   // true si le pseudo est verrouillé par l'admin
-    let remoteConfig = {};          // V16: Config distante (incluant blocked_exercises)
+    let remoteConfig = {};          // Config distante (vide dans la version Firefox)
 
     /**
-     * Vérifie la config distante (Gist) pour bloquer l'extension pendant les contrôles
-     * Stocke le résultat dans extensionBlocked (ne bloque PAS Kwyk, seulement l'extension)
+     * Version Firefox : pas de config distante, pas de gestion utilisateurs.
+     * Retourne immédiatement sans bloquer.
      */
     async function checkRemoteConfig() {
-        try {
-            console.log('[Kwyk Tutor] Vérification config distante...');
-            const response = await fetch(GIST_RAW_URL + '?t=' + Date.now(), { cache: 'no-store' });
-
-            if (!response.ok) {
-                console.error('[Kwyk Tutor] Erreur fetch config:', response.status);
-                extensionBlocked = true;
-                blockedMessage = 'Impossible de vérifier la configuration. Vérifiez votre connexion.';
-                return;
-            }
-
-            remoteConfig = await response.json();
-            console.log('[Kwyk Tutor] Config distante reçue:', remoteConfig);
-
-            // Charger le token Gist depuis la config (stocké inversé pour éviter la détection GitHub)
-            if (remoteConfig.gist_token_rev) {
-                gistToken = remoteConfig.gist_token_rev.split('').reverse().join('');
-                chrome.storage.local.set({ kwykGistToken: gistToken });
-            } else if (remoteConfig.gist_token) {
-                // Fallback legacy (token non inversé)
-                gistToken = remoteConfig.gist_token;
-                chrome.storage.local.set({ kwykGistToken: gistToken });
-            } else {
-                // Fallback : token mis en cache lors d'une session précédente
-                const cached = await new Promise(r => chrome.storage.local.get('kwykGistToken', r));
-                if (cached.kwykGistToken) gistToken = cached.kwykGistToken;
-            }
-
-            // Vérifier les plages horaires bloquées
-            if (remoteConfig.blocked_periods && remoteConfig.blocked_periods.length > 0) {
-                const now = new Date();
-                for (const period of remoteConfig.blocked_periods) {
-                    const start = new Date(period.start);
-                    const end = new Date(period.end);
-
-                    if (now >= start && now <= end) {
-                        console.log('[Kwyk Tutor] ⛔ PÉRIODE BLOQUÉE:', period.label);
-                        const endStr = end.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-                        extensionBlocked = true;
-                        blockedMessage = `${period.label || 'Contrôle en cours'} - Indisponible jusqu'à ${endStr}`;
-                        return;
-                    }
-                }
-            }
-
-
-            // Vérifier la version (seulement si update_enabled est actif)
-            // Compare LOCAL_VERSION (hardcodé) ET version stockée (après update réussi) avec la version distante.
-            // La version stockée sert de fallback si le rechargement de l'extension ne prend pas
-            // effet immédiatement (cache navigateur, etc.)
-            const updateEnabled = remoteConfig.update_enabled === true || remoteConfig.update_enabled === 'true';
-            if (updateEnabled && remoteConfig.version) {
-                const stored = await new Promise(r => chrome.storage.local.get('kwykInstalledVersion', r));
-                const installedVersion = stored.kwykInstalledVersion || '';
-                const isUpToDate = remoteConfig.version === LOCAL_VERSION || remoteConfig.version === installedVersion;
-
-                if (!isUpToDate) {
-                    console.log(`[Kwyk Tutor] ℹ️ Mise à jour disponible: ${remoteConfig.version} (local: ${LOCAL_VERSION}, stocké: ${installedVersion || 'aucun'})`);
-                    window._kwykUpdateAvailable = remoteConfig.version;
-                    window._kwykUpdateConfig = remoteConfig;
-                    window._kwykUpdateChangelog = remoteConfig.changelog || [];
-                } else {
-                    console.log(`[Kwyk Tutor] ✓ Version à jour: ${LOCAL_VERSION} (stocké: ${installedVersion || 'aucun'})`);
-                    // Nettoyer la version stockée si LOCAL_VERSION correspond (le code est vraiment à jour)
-                    if (LOCAL_VERSION === remoteConfig.version && installedVersion) {
-                        chrome.storage.local.remove('kwykInstalledVersion');
-                    }
-                }
-            }
-
-            console.log('[Kwyk Tutor] ✓ Aucun blocage actif');
-
-        } catch (error) {
-            console.error('[Kwyk Tutor] Erreur vérification config:', error);
-            extensionBlocked = true;
-            blockedMessage = 'Impossible de vérifier la configuration. Vérifiez votre connexion.';
-        }
+        extensionBlocked = false;
+        return;
     }
 
-    // ===========================================
-    // GESTION UTILISATEURS
-    // ===========================================
-
-    /**
-     * Charge l'UUID utilisateur depuis chrome.storage.local (ou en génère un)
-     */
-    async function loadUserId() {
-        return new Promise((resolve) => {
-            chrome.storage.local.get(['kwykUserId', 'kwykUserPseudo'], (result) => {
-                if (result.kwykUserId) {
-                    userId = result.kwykUserId;
-                } else {
-                    userId = crypto.randomUUID();
-                    chrome.storage.local.set({ kwykUserId: userId });
-                }
-                if (result.kwykUserPseudo) {
-                    userPseudo = result.kwykUserPseudo;
-                }
-                console.log('[Kwyk Tutor] User ID:', userId, '| Pseudo:', userPseudo || '(non défini)');
-                resolve();
-            });
-        });
-    }
-
-    /**
-     * Vérifie l'accès de l'utilisateur dans le Gist users
-     * - Si l'utilisateur n'existe pas → autorisé par défaut
-     * - Si enabled === false → bloqué
-     * - Met à jour le pseudo si renommé par l'admin
-     */
-    async function checkUserAccess() {
-        try {
-            const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                headers: { 'Authorization': `token ${gistToken}` }
-            });
-
-            if (!response.ok) {
-                console.error('[Kwyk Tutor] Erreur fetch users gist:', response.status);
-                return;
-            }
-
-            const gist = await response.json();
-            const file = gist.files['kwyk-users.json'];
-            if (!file) return;
-
-            let usersData;
-            try {
-                usersData = JSON.parse(file.content);
-            } catch (e) {
-                console.error('[Kwyk Tutor] JSON corrompu dans Gist users:', e);
-                return;
-            }
-            const userData = usersData[userId];
-
-            if (userData) {
-                // Utilisateur connu
-                if (userData.enabled === false) {
-                    userBlocked = true;
-                    console.log('[Kwyk Tutor] ⛔ Utilisateur désactivé par admin');
-                    return;
-                }
-                // Si l'admin a renommé le pseudo, on met à jour localement
-                if (userData.name && userData.name !== userPseudo) {
-                    userPseudo = userData.name;
-                    chrome.storage.local.set({ kwykUserPseudo: userPseudo });
-                }
-                // Vérifier si pseudo verrouillé
-                if (userData.locked) {
-                    userPseudoLocked = true;
-                }
-            }
-        } catch (error) {
-            console.error('[Kwyk Tutor] Erreur vérification accès utilisateur:', error);
-        }
-    }
-
-    /**
-     * Enregistre ou met à jour l'utilisateur dans le Gist users
-     */
-    async function registerUser(pseudo) {
-        try {
-            // Lire le Gist actuel
-            const response = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                headers: { 'Authorization': `token ${gistToken}` }
-            });
-
-            if (!response.ok) {
-                console.error('[Kwyk Tutor] Erreur lecture gist users:', response.status);
-                return false;
-            }
-
-            const gist = await response.json();
-            const file = gist.files['kwyk-users.json'];
-            let usersData = {};
-            if (file) {
-                try {
-                    usersData = JSON.parse(file.content);
-                } catch (e) {
-                    console.error('[Kwyk Tutor] JSON corrompu dans Gist users:', e);
-                }
-            }
-
-            // Ajouter/mettre à jour l'utilisateur
-            // Les champs admin (enabled, locked) sont préservés via le spread — jamais écrasés par content.js
-            const existing = usersData[userId] || {};
-            usersData[userId] = {
-                enabled: true,   // défaut pour nouvel utilisateur
-                locked: false,   // défaut pour nouvel utilisateur
-                ...existing,     // préserve les champs admin (enabled, locked) pour les utilisateurs existants
-                name: pseudo,
-                lastSeen: new Date().toISOString(),
-                lastPing: new Date().toISOString()
-            };
-
-            // Écrire dans le Gist
-            const writeResponse = await fetch(`https://api.github.com/gists/${USERS_GIST_ID}`, {
-                method: 'PATCH',
-                headers: {
-                    'Authorization': `token ${gistToken}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    files: {
-                        'kwyk-users.json': {
-                            content: JSON.stringify(usersData, null, 2)
-                        }
-                    }
-                })
-            });
-
-            if (writeResponse.ok) {
-                userPseudo = pseudo;
-                chrome.storage.local.set({ kwykUserPseudo: pseudo });
-                console.log('[Kwyk Tutor] Utilisateur enregistré:', pseudo);
-                return true;
-            } else {
-                console.error('[Kwyk Tutor] Erreur écriture gist users:', writeResponse.status);
-                return false;
-            }
-        } catch (error) {
-            console.error('[Kwyk Tutor] Erreur enregistrement utilisateur:', error);
-            return false;
-        }
-    }
-
-
-    /**
-     * Affiche le formulaire de saisie du pseudo dans le panel
-     */
-    function showPseudoPrompt() {
-        const panel = document.getElementById('kwyk-tutor-panel');
-        if (!panel) return;
-
-        // Masquer tout le contenu sauf le header
-        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
-        elementsToHide.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-        });
-
-        const pseudoForm = document.createElement('div');
-        pseudoForm.id = 'kwyk-pseudo-form';
-        pseudoForm.innerHTML = `
-            <div style="padding: 20px; text-align: center;">
-                <div style="font-size: 32px; margin-bottom: 12px;">👋</div>
-                <h3 style="margin-bottom: 8px; color: var(--kwyk-text, #212529);">Bienvenue sur Kwyk Tutor !</h3>
-                <p style="font-size: 13px; color: var(--kwyk-text-secondary, #6c757d); margin-bottom: 16px;">Choisis un pseudo pour commencer</p>
-                <input type="text" id="kwyk-pseudo-input" placeholder="Ton pseudo..." style="
-                    width: 100%; padding: 10px 14px; border: 2px solid #e9ecef; border-radius: 8px;
-                    font-size: 14px; margin-bottom: 12px; outline: none; background: var(--kwyk-input-bg, white);
-                    color: var(--kwyk-text, #212529);
-                ">
-                <button id="kwyk-pseudo-submit" style="
-                    width: 100%; padding: 10px; border: none; border-radius: 8px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white; font-size: 14px; font-weight: 600; cursor: pointer;
-                ">Valider</button>
-            </div>
-        `;
-
-        const header = panel.querySelector('.kwyk-tutor-header');
-        if (header) {
-            header.after(pseudoForm);
-        }
-
-        const input = document.getElementById('kwyk-pseudo-input');
-        const submitBtn = document.getElementById('kwyk-pseudo-submit');
-
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') submitBtn.click();
-        });
-
-        submitBtn.addEventListener('click', async () => {
-            const pseudo = input.value.trim();
-            if (!pseudo) {
-                input.style.borderColor = '#dc3545';
-                return;
-            }
-
-            submitBtn.textContent = 'Enregistrement...';
-            submitBtn.disabled = true;
-
-            const success = await registerUser(pseudo);
-            if (success) {
-                pseudoForm.remove();
-                // Afficher le choix du côté (puis continueInit)
-                showSidePrompt();
-            } else {
-                submitBtn.textContent = 'Erreur, réessayer';
-                submitBtn.disabled = false;
-            }
-        });
-    }
-
-    /**
-     * Affiche le formulaire de choix du côté du panneau dans le panel
-     * Appelé après showPseudoPrompt() ou directement si pseudo déjà défini
-     */
-    function showSidePrompt() {
-        const panel = document.getElementById('kwyk-tutor-panel');
-        if (!panel) return;
-
-        // Ouvrir le panneau si fermé
-        panel.classList.add('open');
-
-        // Masquer tout le contenu sauf le header
-        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
-        elementsToHide.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-        });
-
-        let selectedSide = null;
-
-        const sideForm = document.createElement('div');
-        sideForm.id = 'kwyk-side-form';
-        sideForm.innerHTML = `
-            <div style="padding: 20px; text-align: center;">
-                <div style="font-size: 32px; margin-bottom: 12px;">📍</div>
-                <h3 style="margin-bottom: 8px; color: var(--kwyk-text, #212529);">Position du bouton</h3>
-                <p style="font-size: 13px; color: var(--kwyk-text-secondary, #6c757d); margin-bottom: 16px;">De quel côté veux-tu voir le bouton ?</p>
-                <div style="display: flex; gap: 10px; margin-bottom: 12px;">
-                    <button id="kwyk-side-left-btn" style="
-                        flex: 1; padding: 14px 10px; border: 2px solid #e9ecef; border-radius: 10px;
-                        background: white; color: #212529; font-size: 15px; font-weight: 600; cursor: pointer;
-                        transition: border-color 0.2s, background 0.2s;
-                    ">◀ Gauche</button>
-                    <button id="kwyk-side-right-btn" style="
-                        flex: 1; padding: 14px 10px; border: 2px solid #e9ecef; border-radius: 10px;
-                        background: white; color: #212529; font-size: 15px; font-weight: 600; cursor: pointer;
-                        transition: border-color 0.2s, background 0.2s;
-                    ">Droite ▶</button>
-                </div>
-                <button id="kwyk-side-validate" disabled style="
-                    width: 100%; padding: 10px; border: none; border-radius: 8px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white; font-size: 14px; font-weight: 600; cursor: not-allowed;
-                    opacity: 0.4; transition: opacity 0.2s;
-                ">Valider</button>
-            </div>
-        `;
-
-        const header = panel.querySelector('.kwyk-tutor-header');
-        if (header) header.after(sideForm);
-
-        const leftBtn = document.getElementById('kwyk-side-left-btn');
-        const rightBtn = document.getElementById('kwyk-side-right-btn');
-        const validateBtn = document.getElementById('kwyk-side-validate');
-
-        function selectSide(side) {
-            selectedSide = side;
-            // Highlight le bouton sélectionné
-            leftBtn.style.borderColor = side === 'left' ? '#667eea' : '#e9ecef';
-            leftBtn.style.background = side === 'left' ? '#f0f4ff' : 'white';
-            rightBtn.style.borderColor = side === 'right' ? '#667eea' : '#e9ecef';
-            rightBtn.style.background = side === 'right' ? '#f0f4ff' : 'white';
-            // Activer le bouton Valider
-            validateBtn.disabled = false;
-            validateBtn.style.opacity = '1';
-            validateBtn.style.cursor = 'pointer';
-            // Aperçu en temps réel
-            applyPanelSide(side);
-        }
-
-        function confirmSide() {
-            if (!selectedSide) return;
-            config.panelSide = selectedSide;
-            chrome.storage.sync.set({ panelSide: selectedSide });
-            sideForm.remove();
-            elementsToHide.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.style.display = '';
-            });
-            continueInit();
-        }
-
-        leftBtn.addEventListener('click', () => selectSide('left'));
-        rightBtn.addEventListener('click', () => selectSide('right'));
-        validateBtn.addEventListener('click', confirmSide);
-    }
-
-    /**
-     * Continue l'initialisation après enregistrement du pseudo
-     */
-    function continueInit() {
-        updateButtonsForMode();
-
-        setTimeout(() => {
-            detectExercise();
-        }, 1500);
-
-        setupExerciseObserver();
-
-        if (chrome?.storage?.onChanged) {
-            chrome.storage.onChanged.addListener((changes, area) => {
-                if (area === 'sync') {
-                    if (changes.mode) {
-                        config.mode = changes.mode.newValue;
-                        updateButtonsForMode();
-                        checkUnsupportedExercise();
-                    }
-                    if (changes.cheatAutoValidate !== undefined) {
-                        config.cheatAutoValidate = changes.cheatAutoValidate.newValue;
-                    }
-                    if (changes.cheatAutoNext !== undefined) {
-                        config.cheatAutoNext = changes.cheatAutoNext.newValue;
-                    }
-                    if (changes.panelSide) {
-                        config.panelSide = changes.panelSide.newValue;
-                        applyPanelSide(config.panelSide);
-                    }
-                }
-            });
-        }
-    }
-
-    // ===========================================
-    // MISE À JOUR INLINE
-    // ===========================================
-
-    async function performInlineUpdate() {
-        const btn = document.getElementById('kwyk-update-link');
-        const banner = document.getElementById('kwyk-update-banner');
-
-        try {
-            // Re-fetch la config fraîche (évite les problèmes de cache CDN)
-            btn.textContent = 'Chargement...';
-            btn.disabled = true;
-            const freshResponse = await fetch(GIST_RAW_URL + '?t=' + Date.now(), { cache: 'no-store' });
-            const config = await freshResponse.json();
-            console.log('[Kwyk Tutor] Config fraîche pour update:', config);
-
-            if (!config.update_repo || !config.update_files) {
-                alert('Configuration de mise à jour non disponible. Contactez l\'administrateur.');
-                btn.textContent = 'Mettre à jour';
-                btn.disabled = false;
-                return;
-            }
-            // Étape 1 : Sélectionner le dossier
-            btn.textContent = 'Sélectionnez le dossier...';
-            btn.disabled = true;
-
-            let dirHandle;
-            try {
-                dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-            } catch (e) {
-                if (e.name === 'AbortError') {
-                    btn.textContent = 'Mettre à jour';
-                    btn.disabled = false;
-                    return;
-                }
-                throw e;
-            }
-
-            // Vérifier que c'est le bon dossier
-            try {
-                await dirHandle.getFileHandle('manifest.json');
-            } catch {
-                alert('Ce dossier ne contient pas manifest.json. Sélectionnez le dossier de l\'extension.');
-                btn.textContent = 'Mettre à jour';
-                btn.disabled = false;
-                return;
-            }
-
-            // Étape 2 : Télécharger et écrire les fichiers
-            const files = config.update_files;
-            const repo = config.update_repo;
-            const branch = config.update_branch || 'main';
-            const basePath = config.update_path ? config.update_path + '/' : '';
-            let done = 0;
-
-            console.log('[Kwyk Tutor] Update config:', JSON.stringify({ repo, branch, basePath, files }));
-
-            for (const file of files) {
-                btn.textContent = `${done}/${files.length} fichiers...`;
-
-                const url = `https://raw.githubusercontent.com/${repo}/${branch}/${basePath}${file}?t=${Date.now()}`;
-                console.log(`[Kwyk Tutor] Téléchargement: ${url}`);
-                const response = await fetch(url);
-
-                if (!response.ok) {
-                    console.error(`[Kwyk Tutor] Erreur téléchargement ${file}: HTTP ${response.status} — URL: ${url}`);
-                    continue;
-                }
-
-                // Gérer les sous-dossiers
-                const parts = file.split('/');
-                let currentDir = dirHandle;
-                for (let j = 0; j < parts.length - 1; j++) {
-                    currentDir = await currentDir.getDirectoryHandle(parts[j], { create: true });
-                }
-
-                const fileName = parts[parts.length - 1];
-                const isBinary = /\.(png|jpg|jpeg|gif|ico|woff|woff2|ttf)$/i.test(fileName);
-
-                const fileHandle = await currentDir.getFileHandle(fileName, { create: true });
-                const writable = await fileHandle.createWritable();
-
-                if (isBinary) {
-                    await writable.write(await response.blob());
-                } else {
-                    await writable.write(await response.text());
-                }
-                await writable.close();
-                done++;
-            }
-
-            // Vérifier que TOUS les fichiers ont été téléchargés
-            if (done < files.length) {
-                banner.innerHTML = `
-                    <span>⚠️ ${files.length - done} fichier(s) non téléchargé(s). Réessayez.</span>
-                    <button id="kwyk-update-link">Réessayer</button>
-                `;
-                banner.style.borderColor = 'rgba(231, 76, 60, 0.5)';
-                banner.style.background = 'rgba(231, 76, 60, 0.1)';
-                banner.style.color = '#e74c3c';
-                document.getElementById('kwyk-update-link').addEventListener('click', () => {
-                    performInlineUpdate();
-                });
-                console.error(`[Kwyk Tutor] Mise à jour incomplète: ${done}/${files.length} fichiers`);
-                return;
-            }
-
-            // Succès — stocker la version installée pour éviter la boucle de mise à jour
-            // Utiliser la version du Gist (config.version dans ce scope = Gist config)
-            // + fallback sur window._kwykUpdateAvailable pour être sûr
-            const installedVer = window._kwykUpdateAvailable || config.version || 'unknown';
-            chrome.storage.local.set({ kwykInstalledVersion: installedVer });
-            console.log(`[Kwyk Tutor] ✓ Version ${installedVer} stockée dans chrome.storage.local`);
-
-            banner.innerHTML = `
-                <span>v${installedVer} installée ! Rechargement...</span>
-            `;
-            banner.style.borderColor = 'rgba(39, 174, 96, 0.5)';
-            banner.style.background = 'rgba(39, 174, 96, 0.1)';
-            banner.style.color = '#27ae60';
-
-            console.log(`[Kwyk Tutor] Mise à jour terminée: ${done}/${files.length} fichiers`);
-
-            // Recharger l'extension — si les fichiers sont bien écrits, LOCAL_VERSION sera correct
-            setTimeout(() => {
-                chrome.runtime.sendMessage({ action: 'reloadExtension' });
-            }, 1500);
-
-        } catch (error) {
-            console.error('[Kwyk Tutor] Erreur mise à jour:', error);
-            btn.textContent = 'Mettre à jour';
-            btn.disabled = false;
-            alert('Erreur: ' + error.message);
-        }
-    }
-
-    // ===========================================
-    // BANNIÈRE MISE À JOUR
-    // ===========================================
-
-    function showUpdateBanner() {
-        const panel = document.getElementById('kwyk-tutor-panel');
-        if (!panel) return;
-
-        const elementsToHide = ['kwyk-preview', 'kwyk-question-nav', 'kwyk-status', 'kwyk-actions', 'kwyk-cheat-section', 'kwyk-response'];
-        elementsToHide.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-        });
-
-        const changelog = window._kwykUpdateChangelog || [];
-        let changelogHTML = '';
-        if (changelog.length > 0) {
-            changelogHTML = `
-                <div class="kwyk-update-changelog">
-                    <div class="kwyk-update-changelog-title">Nouveautés :</div>
-                    <ul class="kwyk-update-changelog-list">
-                        ${changelog.map(item => `<li>${item}</li>`).join('')}
-                    </ul>
-                </div>
-            `;
-        }
-
-        const banner = document.createElement('div');
-        banner.id = 'kwyk-update-banner';
-        banner.innerHTML = `
-            <div class="kwyk-update-banner-header">
-                <span>Mise à jour v${window._kwykUpdateAvailable} requise</span>
-                <button id="kwyk-update-link">Mettre à jour</button>
-            </div>
-            ${changelogHTML}
-        `;
-        const header = panel.querySelector('.kwyk-tutor-header');
-        if (header) header.after(banner);
-
-        document.getElementById('kwyk-update-link').addEventListener('click', () => {
-            performInlineUpdate();
-        });
-
-        console.log('[Kwyk Tutor] Bannière de mise à jour affichée (v' + window._kwykUpdateAvailable + ')');
-    }
+    // Stubs — fonctions supprimées dans la version Firefox (pas de gestion utilisateurs)
+    async function checkUserAccess() { return; }
+    async function registerUser(pseudo) { return; }
+    function showPseudoPrompt() { return; }
+    function showSidePrompt() { return; }
+    async function performInlineUpdate() { return; }
 
     // ===========================================
     // INIT
     // ===========================================
 
     async function init() {
-        console.log('[Kwyk Tutor] Initialisation...');
+        LOG.info('Initialisation...');
 
-        // ÉTAPE 0: Charger l'identité utilisateur
-        await loadUserId();
-
-        // ÉTAPE 0b: Vérifier le blocage distant + accès utilisateur
+        // Version Firefox : pas de config distante, pas de gestion utilisateurs
         await checkRemoteConfig();
-        await checkUserAccess();
 
         await loadConfig();
         createUI();
 
-        // Si utilisateur désactivé par l'admin
-        if (userBlocked) {
-            console.log('[Kwyk Tutor] ⛔ Utilisateur bloqué');
-            const btn = document.getElementById('kwyk-tutor-btn');
-            if (btn) {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    let popup = document.getElementById('kwyk-blocked-popup');
-                    if (popup) { popup.remove(); return; }
-                    popup = document.createElement('div');
-                    popup.id = 'kwyk-blocked-popup';
-                    popup.innerHTML = `
-                        <div class="kwyk-blocked-popup-icon">🚫</div>
-                        <div class="kwyk-blocked-popup-text">Accès désactivé. Contactez l'administrateur.</div>
-                    `;
-                    document.body.appendChild(popup);
-                    setTimeout(() => popup?.remove(), 4000);
-                }, true);
-            }
-            return;
-        }
-
-        // Mise à jour disponible : PRIORITÉ ABSOLUE (avant pseudo, avant blocage)
-        if (window._kwykUpdateAvailable) {
-            console.log('[Kwyk Tutor] Mise à jour prioritaire, affichage bannière...');
-            showUpdateBanner();
-            return;
-        }
-
-        // Si pseudo non défini : afficher le formulaire de pseudo (puis côté)
-        if (!userPseudo) {
-            console.log('[Kwyk Tutor] Pseudo non défini, affichage du formulaire');
-            showPseudoPrompt();
-            return;
-        }
-
-        // Si côté non encore choisi : afficher seulement le formulaire de côté
+        // Si côté non encore choisi : utiliser "right" par défaut
         if (!config.panelSide) {
-            console.log('[Kwyk Tutor] Côté non défini, affichage du formulaire');
-            showSidePrompt();
-            return;
+            config.panelSide = 'right';
+            chrome.storage.sync.set({ panelSide: 'right' });
         }
 
-        // Mettre à jour lastSeen dans le Gist (sans bloquer)
-        registerUser(userPseudo);
-
-        // Si bloqué : masquer le panneau et afficher le message au clic
-        if (extensionBlocked) {
-            console.log('[Kwyk Tutor] ⛔ Extension bloquée:', blockedMessage);
-            const btn = document.getElementById('kwyk-tutor-btn');
-            if (btn) {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    // Afficher un mini popup de blocage à côté du bouton
-                    let popup = document.getElementById('kwyk-blocked-popup');
-                    if (popup) {
-                        popup.remove();
-                        return;
-                    }
-                    popup = document.createElement('div');
-                    popup.id = 'kwyk-blocked-popup';
-                    popup.innerHTML = `
-                        <div class="kwyk-blocked-popup-icon">🔒</div>
-                        <div class="kwyk-blocked-popup-text">${blockedMessage}</div>
-                    `;
-                    document.body.appendChild(popup);
-                    // Fermer après 4 secondes
-                    setTimeout(() => popup?.remove(), 4000);
-                }, true); // capture=true pour intercepter AVANT les autres listeners
-            }
-            return; // Ne PAS initialiser le reste (détection, observer, etc.)
-        }
-
-        // (La bannière de mise à jour est gérée plus haut avec priorité absolue)
+        applyPanelSide(config.panelSide);
 
         updateButtonsForMode();
 
@@ -891,9 +351,11 @@
                 if (area === 'sync') {
                     if (changes.mode) {
                         config.mode = changes.mode.newValue;
+                        updateStatus('', '');
+                        updateCheatStatus('', '');
                         updateButtonsForMode();
                         checkUnsupportedExercise();
-                        console.log('[Kwyk Tutor] Mode changé en temps réel:', config.mode);
+                        LOG.info('Mode changé:', config.mode);
 
                         // Lancer le prefetch en arrière-plan si on passe en péda/triche sur un devoir
                         if ((config.mode === 'pedagogique' || config.mode === 'triche') &&
@@ -903,17 +365,25 @@
                     }
                     if (changes.cheatAutoValidate !== undefined) {
                         config.cheatAutoValidate = changes.cheatAutoValidate.newValue;
-                        console.log('[Kwyk Tutor] Auto-validate changé:', config.cheatAutoValidate);
+                        LOG.debug('Auto-validate changé:', config.cheatAutoValidate);
                     }
                     if (changes.cheatAutoNext !== undefined) {
                         config.cheatAutoNext = changes.cheatAutoNext.newValue;
-                        console.log('[Kwyk Tutor] Auto-next changé:', config.cheatAutoNext);
+                        LOG.debug('Auto-next changé:', config.cheatAutoNext);
+                    }
+                    if (changes.panelSide) {
+                        config.panelSide = changes.panelSide.newValue;
+                        applyPanelSide(config.panelSide);
+                    }
+                    if (changes.panelShortcut) {
+                        config.panelShortcut = changes.panelShortcut.newValue;
+                        LOG.debug('Raccourci changé:', config.panelShortcut);
                     }
                 }
             });
         }
 
-        console.log('[Kwyk Tutor] Mode:', config.mode);
+        LOG.debug('Mode:', config.mode);
 
         // Lancer le prefetch après le premier detectExercise (laisse le temps au DOM de se charger)
         if (config.mode === 'pedagogique' || config.mode === 'triche') {
@@ -924,19 +394,20 @@
             }, 3000); // 3s après init pour laisser le temps au DOM
         }
 
-        console.log('[Kwyk Tutor] Pret !');
     }
+
 
     function loadConfig() {
         return new Promise((resolve) => {
             if (chrome?.storage?.sync) {
-                chrome.storage.sync.get(['mistralApiKey', 'model', 'mode', 'cheatAutoValidate', 'cheatAutoNext', 'panelSide'], (r) => {
+                chrome.storage.sync.get(['mistralApiKey', 'model', 'mode', 'cheatAutoValidate', 'cheatAutoNext', 'panelSide', 'panelShortcut'], (r) => {
                     if (r.mistralApiKey) config.mistralApiKey = r.mistralApiKey;
                     if (r.model) config.model = r.model;
                     if (r.mode) config.mode = r.mode;
                     if (r.cheatAutoValidate !== undefined) config.cheatAutoValidate = r.cheatAutoValidate;
                     if (r.cheatAutoNext !== undefined) config.cheatAutoNext = r.cheatAutoNext;
                     if (r.panelSide) config.panelSide = r.panelSide;
+                    if (r.panelShortcut) config.panelShortcut = r.panelShortcut;
                     resolve();
                 });
             } else {
@@ -955,7 +426,7 @@
         } else {
             document.body.classList.remove('kwyk-side-left');
         }
-        console.log('[Kwyk Tutor] Position panneau:', side || 'right (défaut)');
+        LOG.debug('Position panneau:', side || 'right (défaut)');
     }
 
     // ===========================================
@@ -1000,6 +471,14 @@
         });
 
         exerciseObserver.observe(document.body, { childList: true, subtree: true });
+
+        // Cleanup au déchargement de la page (évite leak observer)
+        window.addEventListener('beforeunload', () => {
+            if (exerciseObserver) {
+                exerciseObserver.disconnect();
+                exerciseObserver = null;
+            }
+        }, { once: true });
     }
 
     function checkExerciseChanged() {
@@ -1013,18 +492,19 @@
 
         // TOUJOURS vider le cache si le hash a changé, même si un des hash était vide
         if (exerciseChanged) {
-            console.log('[Kwyk Tutor] === CHANGEMENT DÉTECTÉ ===');
-            console.log('[Kwyk Tutor] Ancien hash:', oldHash?.substring(0, 30) || '(vide)');
-            console.log('[Kwyk Tutor] Nouveau hash:', lastExerciseHash?.substring(0, 30) || '(vide)');
+            panelUserClosed = false; // Nouvel exercice → autoriser la réouverture auto
+            LOG.debug('=== CHANGEMENT DÉTECTÉ ===');
+            LOG.debug('Ancien hash:', oldHash?.substring(0, 30) || '(vide)');
+            LOG.debug('Nouveau hash:', lastExerciseHash?.substring(0, 30) || '(vide)');
 
             // IMPORTANT: Toujours vider le cache quand l'exercice change
             if (cachedSolution) {
-                console.log('[Kwyk Tutor] 🗑️ Cache solution VIDÉ (exercice changé)');
+                LOG.debug('🗑️ Cache solution VIDÉ (exercice changé)');
                 cachedSolution = null;
             }
             // Annuler toute exécution de mode triche en cours
             cheatExecutionId++;
-            console.log('[Kwyk Tutor] 🔄 Nouvelle execution ID:', cheatExecutionId);
+            LOG.debug('🔄 Nouvelle execution ID:', cheatExecutionId);
             if (cheatAbortController) {
                 cheatAbortController.abort();
                 cheatAbortController = null;
@@ -1035,15 +515,14 @@
 
         // Réinitialiser l'UI seulement si les deux hash sont non-vides (éviter le premier chargement)
         if (exerciseChanged && oldHash !== '' && lastExerciseHash !== '') {
-            console.log('[Kwyk Tutor] === NOUVEL EXERCICE ===');
+            LOG.debug('=== NOUVEL EXERCICE ===');
             updateStatus('Nouvel exercice !', 'info');
+            updateCheatStatus('', ''); // Reset badge troll du cycle précédent
 
             // Vider la zone de réponse (sauf en mode révision)
             if (config.mode !== 'revision') {
                 const area = document.getElementById('kwyk-response');
-                if (area) {
-                    area.innerHTML = '<div class="kwyk-bubble">Nouvel exercice détecté ! Clique sur un bouton pour commencer.</div>';
-                }
+                if (area) area.innerHTML = '';
             }
 
             // Gérer la navigation
@@ -1070,7 +549,7 @@
                     }, 8000, 200);
                     // Laisser MathQuill et les scripts Kwyk s'initialiser
                     await new Promise(r => setTimeout(r, 1500));
-                    console.log('[Kwyk Tutor] Page stable, lancement mode triche');
+                    LOG.debug('Page stable, lancement mode triche');
                     executeCheatMode();
                 })();
             }
@@ -1177,7 +656,7 @@
         panel.id = 'kwyk-tutor-panel';
         panel.innerHTML = `
             <div class="kwyk-tutor-header">
-                <h2>Tuteur Maths</h2>
+                <h2>Kwyk Tutor</h2>
                 <button class="kwyk-tutor-close" id="kwyk-close">&times;</button>
             </div>
             <div class="kwyk-exercise-preview" id="kwyk-preview">
@@ -1185,21 +664,21 @@
                 <div id="kwyk-preview-text">Chargement...</div>
             </div>
             <div class="kwyk-question-nav" id="kwyk-question-nav" style="display:none;"></div>
-            <div class="kwyk-status" id="kwyk-status"></div>
             <div class="kwyk-action-buttons" id="kwyk-actions">
                 <button class="kwyk-action-btn primary" id="btn-explain">Explique</button>
                 <button class="kwyk-action-btn secondary" id="btn-hint">Règle</button>
                 <button class="kwyk-action-btn warning" id="btn-answer">Réponse</button>
             </div>
+            <div class="kwyk-status" id="kwyk-status"></div>
+            <div class="kwyk-cheat-status" id="kwyk-cheat-status" style="display:none;"></div>
             <div class="kwyk-cheat-mode" id="kwyk-cheat-section" style="display:none;">
                 <div class="kwyk-cheat-toggle">
-                    <span class="kwyk-cheat-label">Mode Triche</span>
+                    <span class="kwyk-cheat-label">Mode Troll</span>
                     <label class="kwyk-switch">
                         <input type="checkbox" id="kwyk-cheat-switch">
                         <span class="kwyk-slider"></span>
                     </label>
                 </div>
-                <div class="kwyk-cheat-status" id="kwyk-cheat-status">En attente...</div>
             </div>
             <div class="kwyk-revision-section" id="kwyk-revision-section" style="display:none;">
                 <button class="kwyk-revision-analyze-btn" id="kwyk-revision-analyze">
@@ -1216,7 +695,10 @@
 
         // Events
         btn.addEventListener('click', togglePanel);
-        document.getElementById('kwyk-close').addEventListener('click', () => panel.classList.remove('open'));
+        document.getElementById('kwyk-close').addEventListener('click', () => {
+            panel.classList.remove('open');
+            panelUserClosed = true;
+        });
         document.getElementById('btn-explain').addEventListener('click', () => handleAction('explain'));
         document.getElementById('btn-hint').addEventListener('click', () => handleAction('hint'));
         document.getElementById('btn-answer').addEventListener('click', () => handleAction('answer'));
@@ -1248,18 +730,25 @@
             btn.style.display = '';
             if (panel) panel.classList.add('open');
             handleAction('explain');
-            console.log('[Kwyk Tutor] Bouton réaffiché + panel ouvert + explain lancé');
+            LOG.debug('Bouton réaffiché + panel ouvert + explain lancé');
         } else {
             // Tout est visible → fermer le panel ET cacher le bouton
             if (panel) panel.classList.remove('open');
             btn.style.display = 'none';
-            console.log('[Kwyk Tutor] Bouton et panel masqués');
+            LOG.debug('Bouton et panel masqués');
         }
     }
 
-    // V12: Raccourci clavier Ctrl+Enter pour masquer/afficher bouton + panel
+    // Raccourci clavier configurable pour masquer/afficher bouton + panel
     document.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.key === 'Enter') {
+        const shortcut = (config.panelShortcut || 'ctrl+enter').split('+');
+        const key = shortcut[shortcut.length - 1];
+        const needCtrl = shortcut.includes('ctrl');
+        const needAlt = shortcut.includes('alt');
+        const needShift = shortcut.includes('shift');
+        const pressedKey = e.key === ' ' ? 'space' : e.key.toLowerCase();
+        const keyMatch = pressedKey === key || (key === 'enter' && e.key === 'Enter');
+        if (keyMatch && e.ctrlKey === needCtrl && e.altKey === needAlt && e.shiftKey === needShift) {
             e.preventDefault();
             toggleVisibility();
         }
@@ -1293,15 +782,12 @@
 
         if (config.mode === 'triche') {
             if (cheatSection) cheatSection.style.display = 'block';
-            console.log('[Kwyk Tutor] Mode triche: switch activé');
         } else if (config.mode === 'revision') {
             if (revisionSection) revisionSection.style.display = 'block';
-            console.log('[Kwyk Tutor] Mode révision: panneau révision activé');
         } else {
             if (actionsEl) actionsEl.style.display = 'flex';
             if (responseEl) responseEl.style.display = 'block';
             if (previewEl) previewEl.style.display = '';
-            console.log('[Kwyk Tutor] Mode pédagogique: tous les boutons visibles');
         }
     }
 
@@ -1311,11 +797,13 @@
 
         if (!text) {
             statusEl.style.display = 'none';
+            statusEl.className = 'kwyk-status';
             return;
         }
 
-        statusEl.style.display = 'block';
-        statusEl.innerHTML = `<span class="status-${type}">${escapeHtml(text)}</span>`;
+        statusEl.style.display = '';
+        statusEl.className = `kwyk-status${type ? ' status-' + type : ''}`;
+        statusEl.textContent = text;
     }
 
     /**
@@ -1338,9 +826,12 @@
             statusEl.textContent = text;
         }
 
-        // Ouvre le panneau automatiquement si fermé et état important
+        // Masquer si pas de statut actif (état idle)
+        statusEl.style.display = (type || text) ? '' : 'none';
+
+        // Ouvre le panneau automatiquement si fermé et état important (sauf si l'utilisateur l'a fermé manuellement)
         const panel = document.getElementById('kwyk-tutor-panel');
-        if (panel && !panel.classList.contains('open') && (type === 'error' || type === 'loading')) {
+        if (panel && !panel.classList.contains('open') && !panelUserClosed && (type === 'error' || type === 'loading')) {
             panel.classList.add('open');
         }
 
@@ -1367,13 +858,60 @@
     }
 
     /**
+     * Affiche un avertissement obligatoire avant la 1ère activation du mode Troll.
+     * Retourne true si l'utilisateur accepte, false sinon.
+     */
+    function showTrollWarning() {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,sans-serif;';
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'background:white;border-radius:12px;max-width:520px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,0.3);white-space:normal;';
+            modal.innerHTML = '<h2 style="color:#c62828;margin-bottom:16px;font-size:20px;white-space:normal;">⚠️ Avertissement — Mode Troll</h2>'
+                + '<p style="color:#333;margin-bottom:12px;line-height:1.5;font-size:14px;white-space:normal;">Le mode <strong>Troll</strong> remplit automatiquement les réponses générées par l\'IA. Son objectif principal est de <strong>démontrer la fiabilité</strong> de l\'assistant avant d\'utiliser les explications pédagogiques.</p>'
+                + '<div style="background:#ffebee;border-left:4px solid #ef5350;padding:12px;margin:16px 0;border-radius:4px;">'
+                + '<div style="color:#b71c1c;font-weight:600;margin:0 0 6px 0;font-size:13px;white-space:normal;">L\'utilisation de ce mode lors de :</div>'
+                + '<div style="color:#b71c1c;font-size:13px;line-height:1.6;white-space:normal;margin:0 0 10px 0;"><div style="margin:0;padding:0;">— une évaluation notée, contrôle, examen</div><div style="margin:0;padding:0;">— un devoir surveillé en classe</div><div style="margin:0;padding:0;">— tout contexte où une aide extérieure est interdite</div></div>'
+                + '<div style="color:#b71c1c;margin:0;font-size:13px;white-space:normal;">constitue une violation des règles scolaires et des CGU de la plateforme. <strong>Toute conséquence (sanction disciplinaire, désactivation du compte) est sous ta seule responsabilité.</strong></div>'
+                + '</div>'
+                + '<p style="color:#666;font-size:12px;margin-bottom:18px;white-space:normal;">En activant ce mode, tu reconnais avoir lu et compris cet avertissement. Voir les <a href="https://patatax-formulaire.notion.site/Conditions-d-Utilisation-Kwyk-Tutor-35cc3ccd8936818f8306d0374eaaf9d6" target="_blank" style="color:#667eea;">conditions d\'utilisation complètes</a>.</p>'
+                + '<div style="display:flex;gap:10px;justify-content:flex-end;"><button id="kwyk-troll-refuse" style="padding:10px 20px;border:1px solid #ccc;background:white;border-radius:6px;cursor:pointer;font-size:14px;">Annuler</button><button id="kwyk-troll-accept" style="padding:10px 20px;border:none;background:#c62828;color:white;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">J\'ai compris et j\'accepte</button></div>';
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            modal.querySelector('#kwyk-troll-accept').onclick = () => {
+                document.body.removeChild(overlay);
+                resolve(true);
+            };
+            modal.querySelector('#kwyk-troll-refuse').onclick = () => {
+                document.body.removeChild(overlay);
+                resolve(false);
+            };
+        });
+    }
+
+    /**
      * Gère le toggle du mode triche
      */
     async function handleCheatToggle(e) {
+        // 1ère activation : avertissement obligatoire
+        if (e.target.checked) {
+            const stored = await chrome.storage.sync.get('trollWarningAcknowledged');
+            if (!stored.trollWarningAcknowledged) {
+                const accepted = await showTrollWarning();
+                if (!accepted) {
+                    e.target.checked = false;
+                    return;
+                }
+                await chrome.storage.sync.set({ trollWarningAcknowledged: true });
+            }
+        }
+
         cheatModeActive = e.target.checked;
 
         if (cheatModeActive) {
-            console.log('[Kwyk Tutor] Mode triche ACTIVÉ');
+            LOG.debug('Mode triche ACTIVÉ');
 
             // Lancer le prefetch en arrière-plan (si sur un devoir)
             if (!prefetchInProgress && Object.keys(prefetchCache).length === 0) {
@@ -1382,7 +920,7 @@
 
             // Vérifier si un exercice est détecté
             if (!currentExercise || currentExercise.questions.length === 0) {
-                console.log('[Kwyk Tutor] Aucun exercice détecté, mise en attente...');
+                LOG.debug('Aucun exercice détecté, mise en attente...');
                 pendingCheatMode = true;
                 updateCheatStatus('En attente de l\'exercice...', 'loading');
                 return;
@@ -1393,7 +931,7 @@
             // Lancer le remplissage automatique
             await executeCheatMode();
         } else {
-            console.log('[Kwyk Tutor] Mode triche DÉSACTIVÉ');
+            LOG.debug('Mode triche DÉSACTIVÉ');
             pendingCheatMode = false;
             updateCheatStatus('En attente...', '');
         }
@@ -1404,7 +942,7 @@
      * Attend que le DOM soit stable (hash exercice différent) avant de relancer
      */
     async function smartRelaunch(oldHash) {
-        console.log('[Kwyk Tutor] 🔄 Relance intelligente...');
+        LOG.debug('🔄 Relance intelligente...');
         updateCheatStatus('Réfléxion...', 'loading');
 
         // Attendre 800ms minimum pour laisser le DOM se stabiliser
@@ -1421,7 +959,7 @@
 
             // Vérifier que le hash a changé
             if (lastExerciseHash !== oldHash && currentExercise && currentExercise.questions.length > 0) {
-                console.log('[Kwyk Tutor] ✓ Nouvel exercice détecté, relance !');
+                LOG.debug('✓ Nouvel exercice détecté, relance !');
                 executeCheatMode();
                 return;
             }
@@ -1431,7 +969,7 @@
         }
 
         // Timeout: relancer quand même avec l'exercice actuel
-        console.log('[Kwyk Tutor] ⚠️ Timeout attente DOM, relance avec exercice actuel');
+        LOG.debug('⚠️ Timeout attente DOM, relance avec exercice actuel');
         detectExercise();
         executeCheatMode();
     }
@@ -1444,7 +982,7 @@
 
         // Capturer l'ID d'exécution au début
         const myExecutionId = cheatExecutionId;
-        console.log('[Kwyk Tutor] executeCheatMode démarré (ID:', myExecutionId, ')');
+        LOG.debug('executeCheatMode démarré (ID:', myExecutionId, ')');
 
         // Vérifier EN TOUT PREMIER si bloqué/non supporté — avant même d'acquérir le verrou
         if (!currentExercise || currentExercise.questions.length === 0) {
@@ -1452,23 +990,23 @@
             return;
         }
         if (checkUnsupportedExercise(true)) {
-            console.log('[Kwyk Tutor] Exercice bloqué/non supporté, abandon avant verrou');
+            LOG.debug('Exercice bloqué/non supporté, abandon avant verrou');
             return;
         }
 
         // Vérifier si une autre exécution est en cours
         if (cheatModeRunning) {
-            console.log('[Kwyk Tutor] ⏳ Mode triche déjà en cours, abandon');
+            LOG.debug('⏳ Mode triche déjà en cours, abandon');
             return;
         }
         cheatModeRunning = true;
         cheatAbortController = new AbortController();
 
-        // V15: Bloquer le mode triche pour les tableaux (signes, variations, valeurs)
+        // Bloquer le mode triche pour tableaux signes/variations (pas valeurs — autoFillInput gère)
         const exerciseType = currentExercise?.exerciseType;
-        if (exerciseType === 'tableau_signes' || exerciseType === 'tableau_variations' || exerciseType === 'tableau_valeurs') {
-            console.log(`[Kwyk Tutor] Mode triche bloqué pour type: ${exerciseType}`);
-            updateCheatStatus('Tableaux non supportés en mode triche. Utilise le mode pédagogique !', 'error');
+        if (exerciseType === 'tableau_signes' || exerciseType === 'tableau_variations') {
+            LOG.debug(`Mode triche bloqué pour type: ${exerciseType}`);
+            updateCheatStatus('Tableaux signes/variations non supportés en mode troll.', 'error');
 
             // Auto-skip si les options sont activées
             if (config.cheatAutoValidate && config.cheatAutoNext) {
@@ -1476,7 +1014,7 @@
                     const nextBtn = document.querySelector('button.exercise_next');
                     if (nextBtn) {
                         nextBtn.click();
-                        console.log('[Kwyk Tutor] Auto-skip tableau');
+                        LOG.debug('Auto-skip tableau');
                     }
                 }, 200);
             }
@@ -1491,9 +1029,9 @@
         try {
             // SÉCURITÉ: Toujours vérifier que la solution en cache correspond à l'exercice actuel
             if (cachedSolution && cachedSolution._exerciseHash !== currentHash) {
-                console.log('[Kwyk Tutor] ⚠️ Solution en cache ne correspond pas à l\'exercice actuel, reset...');
-                console.log('[Kwyk Tutor] Hash cache:', cachedSolution._exerciseHash?.substring(0, 20));
-                console.log('[Kwyk Tutor] Hash actuel:', currentHash?.substring(0, 20));
+                LOG.debug('⚠️ Solution en cache ne correspond pas à l\'exercice actuel, reset...');
+                LOG.debug('Hash cache:', cachedSolution._exerciseHash?.substring(0, 20));
+                LOG.debug('Hash actuel:', currentHash?.substring(0, 20));
                 cachedSolution = null;
             }
 
@@ -1502,7 +1040,7 @@
                 // 0. Solvers directs (priorité max — override tout cache IA)
                 const directSolution = tryDirectSolve();
                 if (directSolution) {
-                    console.log('[Kwyk Tutor] Résolution directe (triche) — bypass cache');
+                    LOG.info('Résolution directe (triche) — bypass cache');
                     cachedSolution = directSolution;
                     cachedSolution._exerciseHash = currentHash;
                 } else {
@@ -1511,18 +1049,18 @@
                 const prefetched = exId ? getPrefetchedSolution(exId) : null;
 
                 if (prefetched) {
-                    console.log('[Kwyk Tutor] Utilisation solution prefetchée (triche)');
+                    LOG.info('Utilisation solution prefetchée (triche)');
                     // Petit délai pour laisser la page se charger
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     cachedSolution = prefetched.solution;
                     cachedSolution._exerciseHash = currentHash;
                 } else {
-                console.log('[Kwyk Tutor] Pas de solution en cache, appel IA...');
-                const result = await solveProblem();
+                LOG.debug('Pas de solution en cache, appel IA...');
+                let result = await solveProblem();
 
                 // VÉRIFICATION: L'exercice a-t-il changé pendant l'appel IA ?
                 if (myExecutionId !== cheatExecutionId) {
-                    console.log('[Kwyk Tutor] ⛔ Exercice changé pendant l\'appel IA, abandon (ID:', myExecutionId, '→', cheatExecutionId, ')');
+                    LOG.debug('⛔ Exercice changé pendant l\'appel IA, abandon (ID:', myExecutionId, '→', cheatExecutionId, ')');
                     cheatModeRunning = false;
                     // Relancer intelligemment pour le nouvel exercice
                     smartRelaunch(currentHash);
@@ -1537,26 +1075,34 @@
                     throw new Error(result.error);
                 }
 
+                // Retry silencieux si réponse vide (R1)
+                if (!isValidSolution(result.solution)) {
+                    LOG.warn('Réponse IA vide en triche, retry silencieux...');
+                    result = await solveProblem();
+                    if (myExecutionId !== cheatExecutionId) {
+                        cheatModeRunning = false;
+                        smartRelaunch(currentHash);
+                        return;
+                    }
+                    if (result.error === 'aborted') { cheatModeRunning = false; return; }
+                    if (result.error) throw new Error(result.error);
+                }
+
                 cachedSolution = result.solution;
 
-                // Vérifier que la solution a des réponses non-vides
-                const hasValidResponse = cachedSolution.reponses?.some(r =>
-                    (r.reponse && r.reponse.trim() !== '') ||
-                    (r.reponses && r.reponses.length > 0)
-                );
-                if (!hasValidResponse) {
-                    console.error('[Kwyk Tutor] ⚠️ Solution IA vide, pas de mise en cache');
+                if (!isValidSolution(cachedSolution)) {
+                    LOG.error('⚠️ Solution IA vide même après retry, pas de mise en cache');
                     cachedSolution = null;
                     throw new Error('L\'IA a retourné une réponse vide');
                 }
 
                 // Stocker le hash de l'exercice avec la solution
                 cachedSolution._exerciseHash = currentHash;
-                console.log('[Kwyk Tutor] Nouvelle solution mise en cache (hash:', currentHash?.substring(0, 20), ')');
+                LOG.debug('Nouvelle solution mise en cache (hash:', currentHash?.substring(0, 20), ')');
                 } // fin else (prefetch miss → appel IA normal)
                 } // fin else (direct solver miss → prefetch / IA)
             } else {
-                console.log('[Kwyk Tutor] ✓ Réutilisation solution en cache (même exercice)');
+                LOG.debug('✓ Réutilisation solution en cache (même exercice)');
             }
 
             // Attendre un peu que le DOM soit prêt
@@ -1564,10 +1110,10 @@
 
             // VÉRIFICATION: L'exercice a-t-il changé ?
             if (myExecutionId !== cheatExecutionId) {
-                console.log('[Kwyk Tutor] ⛔ Exercice changé avant remplissage, abandon');
+                LOG.debug('⛔ Exercice changé avant remplissage, abandon');
                 cheatModeRunning = false;
                 // Relancer automatiquement pour le nouvel exercice
-                console.log('[Kwyk Tutor] 🔄 Relance auto pour nouvel exercice...');
+                LOG.debug('🔄 Relance auto pour nouvel exercice...');
                 setTimeout(() => executeCheatMode(), 200);
                 return;
             }
@@ -1579,10 +1125,10 @@
 
             // VÉRIFICATION: L'exercice a-t-il changé ?
             if (myExecutionId !== cheatExecutionId) {
-                console.log('[Kwyk Tutor] ⛔ Exercice changé après remplissage, abandon validation');
+                LOG.debug('⛔ Exercice changé après remplissage, abandon validation');
                 cheatModeRunning = false;
                 // Relancer automatiquement pour le nouvel exercice
-                console.log('[Kwyk Tutor] 🔄 Relance auto pour nouvel exercice...');
+                LOG.debug('🔄 Relance auto pour nouvel exercice...');
                 setTimeout(() => executeCheatMode(), 200);
                 return;
             }
@@ -1604,7 +1150,7 @@
             cheatModeRunning = false;
 
         } catch (error) {
-            console.error(`[Kwyk Tutor] Erreur mode triche (tentative ${retryCount + 1}/${MAX_RETRIES}):`, error);
+            LOG.error(`Erreur mode triche (tentative ${retryCount + 1}/${MAX_RETRIES}):`, error);
 
             if (retryCount < MAX_RETRIES - 1) {
                 updateCheatStatus(`Erreur, nouvelle tentative (${retryCount + 2}/${MAX_RETRIES})...`, 'loading');
@@ -1628,7 +1174,7 @@
      */
     async function autoFillQuestion(questionIndex) {
         if (!cachedSolution || !currentExercise) {
-            console.error('[Kwyk Tutor] Pas de solution ou exercice en cache');
+            LOG.error('Pas de solution ou exercice en cache');
             return false;
         }
 
@@ -1636,24 +1182,24 @@
         const reponse = cachedSolution.reponses[questionIndex];
 
         if (!question || !reponse) {
-            console.error('[Kwyk Tutor] Pas de réponse pour la question', questionIndex + 1);
+            LOG.error('Pas de réponse pour la question', questionIndex + 1);
             return false;
         }
 
-        console.log('[Kwyk Tutor] Auto-fill Q' + (questionIndex + 1) + ':', reponse);
-        console.log('[Kwyk Tutor] Type de question:', question.type);
+        LOG.debug('Auto-fill Q' + (questionIndex + 1) + ':', reponse);
+        LOG.debug('Type de question:', question.type);
 
         const exerciseBlocks = document.querySelectorAll('.exercise_question');
         const block = exerciseBlocks[questionIndex] || exerciseBlocks[0] || null;
 
-        console.log('[Kwyk Tutor] Blocs .exercise_question trouvés:', exerciseBlocks.length);
-        console.log('[Kwyk Tutor] Block sélectionné:', block ? 'OK' : 'NULL (fallback global)');
+        LOG.debug('Blocs .exercise_question trouvés:', exerciseBlocks.length);
+        LOG.debug('Block sélectionné:', block ? 'OK' : 'NULL (fallback global)');
 
         // Déterminer le type effectif (l'IA peut retourner qcm_multiples)
         const aiType = reponse.type || 'unknown';
         const domType = question.type;
 
-        console.log('[Kwyk Tutor] Type IA:', aiType, '| DOM:', domType, '| answerFormat:', question.answerFormat || '?');
+        LOG.debug('Type IA:', aiType, '| DOM:', domType, '| answerFormat:', question.answerFormat || '?');
 
         try {
             // Si l'IA dit qcm_multiples ou si le DOM a des checkboxes -> utiliser autoFillCheckbox
@@ -1665,12 +1211,12 @@
                 return await autoFillInput(block, question, reponse, questionIndex);
             } else {
                 // Type inconnu - détecter automatiquement
-                console.log('[Kwyk Tutor] Type inconnu, détection automatique...');
+                LOG.debug('Type inconnu, détection automatique...');
 
                 // 1. Vérifier s'il y a des checkboxes globales (pattern id_answer_X_Y)
                 const globalCheckboxes = document.querySelectorAll(`input[type="checkbox"][id^="id_answer_${questionIndex}_"]`);
                 if (globalCheckboxes.length > 0) {
-                    console.log('[Kwyk Tutor] Checkboxes globales détectées:', globalCheckboxes.length);
+                    LOG.debug('Checkboxes globales détectées:', globalCheckboxes.length);
                     return await autoFillCheckbox(block, question, reponse, questionIndex);
                 }
 
@@ -1680,23 +1226,23 @@
                     globalRadios = document.querySelectorAll(`input[type="radio"][id^="id_mcq_answer_${questionIndex}_"]`);
                 }
                 if (globalRadios.length > 0) {
-                    console.log('[Kwyk Tutor] Radios globaux détectés:', globalRadios.length);
+                    LOG.debug('Radios globaux détectés:', globalRadios.length);
                     return await autoFillRadio(block, question, reponse, questionIndex);
                 }
 
                 // 3. Vérifier s'il y a un input text global
                 const globalInput = document.querySelector(`input[type="text"][id="id_answer_${questionIndex}"]`);
                 if (globalInput) {
-                    console.log('[Kwyk Tutor] Input text global détecté');
+                    LOG.debug('Input text global détecté');
                     return await autoFillInput(block, question, reponse, questionIndex);
                 }
 
                 // 4. Fallback MathQuill
-                console.log('[Kwyk Tutor] Fallback: essai MathQuill/textarea');
+                LOG.debug('Fallback: essai MathQuill/textarea');
                 return await autoFillInput(block, question, reponse, questionIndex);
             }
         } catch (e) {
-            console.error('[Kwyk Tutor] Erreur auto-fill:', e);
+            LOG.error('Erreur auto-fill:', e);
             return false;
         }
     }
@@ -1713,26 +1259,26 @@
      */
     async function autoFillAllQuestions() {
         if (!cachedSolution || !currentExercise) {
-            console.error('[Kwyk Tutor] Pas de solution ou exercice en cache');
+            LOG.error('Pas de solution ou exercice en cache');
             return false;
         }
 
         const numQuestions = currentExercise.questions.length;
-        console.log('[Kwyk Tutor] === REMPLISSAGE DE TOUTES LES QUESTIONS ===');
-        console.log('[Kwyk Tutor] Nombre de questions:', numQuestions);
+        LOG.debug('=== REMPLISSAGE DE TOUTES LES QUESTIONS ===');
+        LOG.debug('Nombre de questions:', numQuestions);
 
         let allSuccess = true;
 
         // Remplir chaque question
         for (let i = 0; i < numQuestions; i++) {
-            console.log(`[Kwyk Tutor] Remplissage Q${i + 1}/${numQuestions}...`);
+            LOG.debug(`Remplissage Q${i + 1}/${numQuestions}...`);
             const success = await autoFillQuestion(i);
 
             if (!success) {
-                console.warn(`[Kwyk Tutor] Échec du remplissage Q${i + 1}`);
+                LOG.warn(`Échec du remplissage Q${i + 1}`);
                 allSuccess = false;
             } else {
-                console.log(`[Kwyk Tutor] ✓ Q${i + 1} remplie`);
+                LOG.debug(`✓ Q${i + 1} remplie`);
             }
 
             // Petit délai entre chaque question pour éviter les problèmes de timing
@@ -1741,7 +1287,7 @@
             }
         }
 
-        console.log('[Kwyk Tutor] === FIN REMPLISSAGE ===', allSuccess ? 'SUCCÈS' : 'PARTIEL');
+        LOG.debug('=== FIN REMPLISSAGE ===', allSuccess ? 'SUCCÈS' : 'PARTIEL');
         return allSuccess;
     }
 
@@ -1750,7 +1296,7 @@
      * v24: Polling rapide pour vérifier que la validation a fonctionné
      */
     async function autoClickValidate() {
-        console.log('[Kwyk Tutor] Auto-validation...');
+        LOG.debug('Auto-validation...');
         updateCheatStatus('Validation...', 'loading');
 
         // Laisser le temps à MathQuill de traiter l'écriture (write/latex)
@@ -1763,25 +1309,25 @@
         }, 5000, 200);
 
         if (!submitReady) {
-            console.warn('[Kwyk Tutor] ⚠ Bouton Valider pas prêt après 5s');
+            LOG.warn('⚠ Bouton Valider pas prêt après 5s');
         }
 
         // Chercher TOUS les boutons Valider (il peut y en avoir plusieurs)
         const validateBtns = document.querySelectorAll('button.exercise_submit');
 
         if (validateBtns.length === 0) {
-            console.warn('[Kwyk Tutor] Aucun bouton Valider trouvé');
+            LOG.warn('Aucun bouton Valider trouvé');
             updateCheatStatus('✓ Rempli (validation manuelle)', 'success');
             return false;
         }
 
         // Cliquer sur TOUS les boutons Valider
-        console.log(`[Kwyk Tutor] ${validateBtns.length} bouton(s) Valider trouvé(s)`);
+        LOG.debug(`${validateBtns.length} bouton(s) Valider trouvé(s)`);
         validateBtns.forEach((btn, i) => {
             btn.click();
-            console.log(`[Kwyk Tutor] Bouton Valider ${i + 1}/${validateBtns.length} cliqué`);
+            LOG.debug(`Bouton Valider ${i + 1}/${validateBtns.length} cliqué`);
         });
-        console.log('[Kwyk Tutor] Tous les boutons Valider cliqués, vérification...');
+        LOG.debug('Tous les boutons Valider cliqués, vérification...');
 
         // Polling rapide : attendre que le bouton Suivant apparaisse et soit actif
         const validated = await waitForCondition(() => {
@@ -1791,20 +1337,20 @@
         }, 5000, 100);
 
         if (validated) {
-            console.log('[Kwyk Tutor] ✓ Validation confirmée');
+            LOG.debug('✓ Validation confirmée');
 
             // Vérifier si auto-next est activé
             if (config.cheatAutoNext) {
                 await autoClickNext();
             } else {
                 updateCheatStatus('✓ Validé !', 'success');
-                playBeep('success'); // V12: Son de succès
+                playBeep('success'); // Son de succès
             }
             return true;
         } else {
-            console.warn('[Kwyk Tutor] ⚠ Timeout validation');
+            LOG.warn('⚠ Timeout validation');
             updateCheatStatus('⚠ Validez manuellement', 'error');
-            playBeep('error'); // V12: Son d'erreur
+            playBeep('error'); // Son d'erreur
             return false;
         }
     }
@@ -1845,25 +1391,25 @@
      */
     async function autoClickNext(retryCount = 0) {
         const MAX_RETRIES = 3;
-        console.log('[Kwyk Tutor] Auto-clic Suivant... (tentative', retryCount + 1, '/', MAX_RETRIES, ')');
+        LOG.debug('Auto-clic Suivant... (tentative', retryCount + 1, '/', MAX_RETRIES, ')');
         updateCheatStatus(`Passage au suivant...${retryCount > 0 ? ` (retry ${retryCount})` : ''}`, 'loading');
 
         // Sauvegarder l'empreinte de l'exercice actuel
         const previousFingerprint = getExerciseFingerprint();
-        console.log('[Kwyk Tutor] Empreinte exercice actuel:', previousFingerprint?.substring(0, 50));
+        LOG.debug('Empreinte exercice actuel:', previousFingerprint?.substring(0, 50));
 
         // Chercher le bouton Suivant
         const nextBtn = document.querySelector('button.exercise_next');
 
         if (!nextBtn) {
-            console.warn('[Kwyk Tutor] Bouton Suivant non trouvé');
+            LOG.warn('Bouton Suivant non trouvé');
             updateCheatStatus('✓ Validé (suivant manuel)', 'success');
             return false;
         }
 
         // Cliquer sur Suivant
         nextBtn.click();
-        console.log('[Kwyk Tutor] Bouton Suivant cliqué, vérification...');
+        LOG.debug('Bouton Suivant cliqué, vérification...');
 
         // Polling rapide : attendre que l'exercice change (max 2 secondes par tentative)
         const changed = await waitForCondition(() => {
@@ -1872,7 +1418,7 @@
         }, 2000, 100);
 
         if (changed) {
-            console.log('[Kwyk Tutor] ✓ Exercice changé, attente chargement complet de la page...');
+            LOG.debug('✓ Exercice changé, attente chargement complet de la page...');
             updateCheatStatus('Chargement exercice suivant...', 'loading');
 
             // Phase 1 : Attendre que le bouton Valider + inputs soient dans le DOM
@@ -1884,7 +1430,7 @@
             }, 8000, 200);
 
             if (!domReady) {
-                console.warn('[Kwyk Tutor] ⚠ Timeout chargement DOM nouvel exercice');
+                LOG.debug('⚠ Timeout chargement DOM nouvel exercice');
             }
 
             // Phase 2 : Attendre que MathQuill soit initialisé (les champs .mq-editable-field deviennent interactifs)
@@ -1898,22 +1444,22 @@
                 return submitBtn && !submitBtn.disabled;
             }, 3000, 300);
 
-            console.log('[Kwyk Tutor] ✓ Page stable, prêt pour le prochain exercice');
+            LOG.debug('✓ Page stable, prêt pour le prochain exercice');
 
             // IMPORTANT: Reset la solution en cache pour forcer une nouvelle résolution
             cachedSolution = null;
-            console.log('[Kwyk Tutor] Cache solution vidé pour nouvel exercice');
+            LOG.debug('Cache solution vidé pour nouvel exercice');
             updateCheatStatus('✓ Passé au suivant !', 'success');
-            playBeep('success'); // V12: Son de succès
+            playBeep('success'); // Son de succès
             return true;
         } else {
             // Retry si on n'a pas atteint le max
             if (retryCount < MAX_RETRIES - 1) {
-                console.log('[Kwyk Tutor] Retry clic Suivant...');
+                LOG.debug('Retry clic Suivant...');
                 await new Promise(r => setTimeout(r, 500)); // Petite pause avant retry
                 return autoClickNext(retryCount + 1);
             } else {
-                console.warn('[Kwyk Tutor] ⚠ Max retries atteint - exercice pas changé');
+                LOG.warn('⚠ Max retries atteint - exercice pas changé');
                 updateCheatStatus('⚠ Cliquez manuellement sur Suivant', 'error');
                 return false;
             }
@@ -2007,7 +1553,7 @@
         if (!isNaN(num)) return num;
         // Fallback pour expressions comme -2√3 : on ne peut pas parser exactement,
         // on retourne NaN et le tri sera ignoré
-        console.warn('[Kwyk Tutor] ⚠️ Impossible de parser la valeur critique:', val);
+        LOG.warn('⚠️ Impossible de parser la valeur critique:', val);
         return NaN;
     }
 
@@ -2025,7 +1571,7 @@
                 // Exclu gauche = ], exclu droite = [. Inclus gauche = [, inclus droite = ].
                 // Quand A (exclu ]) passe à droite → [. Quand B (exclu [) passe à gauche → ].
                 const flipBracket = b => b === '[' ? ']' : '[';
-                console.log('[Kwyk Tutor] 🔧 Bornes inversées corrigées:', left.trim(), '>', right.trim());
+                LOG.debug('🔧 Bornes inversées corrigées:', left.trim(), '>', right.trim());
                 return flipBracket(rb) + right + ';' + left + flipBracket(lb);
             }
             return match;
@@ -2054,7 +1600,7 @@
             const sorted = [...critiques].sort((a, b) => parseCriticalValue(a) - parseCriticalValue(b));
             const orderChanged = sorted.some((v, i) => v !== critiques[i]);
             if (orderChanged) {
-                console.warn('[Kwyk Tutor] ⚠️ Critiques mal ordonnées par l\'IA:', critiques, '→ tri + recalcul signes par alternance');
+                LOG.warn('⚠️ Critiques mal ordonnées par l\'IA:', critiques, '→ tri + recalcul signes par alternance');
                 critiques = sorted;
                 // Le signe à +∞ (dernier) est fiable (indépendant de l'ordre des critiques)
                 const lastSign = signes[signes.length - 1];
@@ -2063,13 +1609,13 @@
                 for (let i = n; i >= 0; i--) {
                     signes[i] = ((n - i) % 2 === 0) ? lastSign : (lastSign === '+' ? '-' : '+');
                 }
-                console.log('[Kwyk Tutor] 🔧 Critiques triées:', critiques, '| Signes recalculés:', signes);
+                LOG.debug('🔧 Critiques triées:', critiques, '| Signes recalculés:', signes);
             }
         }
 
         // Validation simple : N+1 signes pour N critiques. Sinon → null (fallback réponse IA)
         if (signes.length !== critiques.length + 1) {
-            console.warn('[Kwyk Tutor] ⚠️ Signes/critiques incompatibles:', signes.length, 'signes pour', critiques.length, 'critiques');
+            LOG.warn('⚠️ Signes/critiques incompatibles:', signes.length, 'signes pour', critiques.length, 'critiques');
             return null;
         }
 
@@ -2155,6 +1701,10 @@
         if (!value) return value;
         value = value.trim();
 
+        // Vecteurs : AB→ ou u→ → \overrightarrow{AB} ou \overrightarrow{u}
+        // Doit être EN PREMIER (avant toute autre transformation)
+        value = value.replace(/([A-Z]{1,2}|[a-z])\u2192/g, '\\overrightarrow{$1}');
+
         // Normaliser les caractères Unicode vers ASCII (ex: tiret long U+2212 → tiret ASCII)
         value = value.replace(/−/g, '-');
         // Supprimer les espaces autour des ; dans les ensembles/intervalles : { -2 ; 3 } → {-2;3}
@@ -2174,7 +1724,7 @@
             // Strip parenthèses superflues autour d'un nombre seul : (-1) → -1, (-5) → -5
             // Ne s'applique pas aux fractions \frac{...} ni aux expressions avec parens imbriquées
             innerConverted = innerConverted.replace(/^\((-?[^()]+)\)$/, '$1');
-            console.log('[Kwyk Tutor] Conversion LaTeX:', value, '->', `\\left\\{${innerConverted}\\right\\}`);
+            LOG.debug('Conversion LaTeX:', value, '->', `\\left\\{${innerConverted}\\right\\}`);
             return `\\left\\{${innerConverted}\\right\\}`;
         }
 
@@ -2251,7 +1801,7 @@
         // Gère: ℝ{-4}, ℝ{4}, ℝ{-4;2}, etc.
         latex = latex.replace(/ℝ\{([^}]+)\}/g, '\\mathbb{R}\\setminus\\left\\{$1\\right\\}');
 
-        // V12: Convertir ℝ seul en \mathbb{R} (domaine = tous les réels)
+        // Convertir ℝ seul en \mathbb{R} (domaine = tous les réels)
         // IMPORTANT: Doit être APRÈS la conversion ℝ{...} pour ne pas interférer
         latex = latex.replace(/ℝ/g, '\\mathbb{R}');
 
@@ -2266,7 +1816,11 @@
         // MathQuill exige \left avec un délimiteur ouvrant et \right avec un fermant.
         // Les crochets restent en taille normale — c'est cosmétique, mais au moins le champ est rempli.
 
-        console.log('[Kwyk Tutor] Conversion LaTeX:', value, '->', latex);
+        // Supprimer les parenthèses superflues autour de \frac : (\frac{a}{b}) → \frac{a}{b}
+        // Se produit quand (7/4) est normalisé en ((7)/(4)) puis converti en (\frac{7}{4})
+        latex = latex.replace(/\(\\frac\{([^}]*)\}\{([^}]*)\}\)/g, '\\frac{$1}{$2}');
+
+        LOG.debug('Conversion LaTeX:', value, '->', latex);
         return latex;
     }
 
@@ -2278,14 +1832,13 @@
      * @param {number} fieldIndex - L'index du champ MathQuill à remplir
      */
     async function autoFillInput(block, question, reponse, fieldIndex = 0) {
-        console.log('[Kwyk Tutor] autoFillInput - Début recherche... fieldIndex:', fieldIndex);
+        LOG.debug('autoFillInput - Début recherche... fieldIndex:', fieldIndex);
 
         const value = reponse.reponse;
-        console.log('[Kwyk Tutor] Valeur à insérer:', value);
+        LOG.debug('Valeur à insérer:', value);
 
-        // Vérifier que la valeur n'est pas vide
-        if (!value || value.trim() === '') {
-            console.error('[Kwyk Tutor] ⚠️ Valeur vide, impossible de remplir le champ');
+        if (isInvalidAnswer(value)) {
+            LOG.warn('Valeur invalide pour auto-fill input:', JSON.stringify(value));
             return false;
         }
 
@@ -2299,7 +1852,7 @@
         }
 
         if (mqFields && mqFields.length > 0) {
-            console.log('[Kwyk Tutor] MathQuill détecté:', mqFields.length, 'champ(s), ciblant index:', fieldIndex);
+            LOG.debug('MathQuill détecté:', mqFields.length, 'champ(s), ciblant index:', fieldIndex);
 
             const mqField = mqFields[fieldIndex];
 
@@ -2317,7 +1870,7 @@
                         .replace(/\\left([[\]])/g, '$1')
                         .replace(/\\right([[\]])/g, '$1');
                     if (simplified !== latex) {
-                        console.log('[Kwyk Tutor] Retry avec LaTeX simplifié:', simplified);
+                        LOG.debug('Retry avec LaTeX simplifié:', simplified);
                         success = await sendToInjectedScript(simplified, fieldIndex);
                     }
                 }
@@ -2327,10 +1880,10 @@
                     highlightElement(mqField);
                     return true;
                 } else {
-                    console.log('[Kwyk Tutor] Script injecté échoué, fallback textarea');
+                    LOG.debug('Script injecté échoué, fallback textarea');
                 }
             } else {
-                console.log('[Kwyk Tutor] MathQuill field index', fieldIndex, 'non trouvé');
+                LOG.debug('MathQuill field index', fieldIndex, 'non trouvé');
             }
         }
 
@@ -2340,7 +1893,7 @@
         const globalInput = document.querySelector(`input[type="text"][id="id_answer_${fieldIndex}"]`);
 
         if (globalInput) {
-            console.log('[Kwyk Tutor] Input text global trouvé:', globalInput.id);
+            LOG.debug('Input text global trouvé:', globalInput.id);
             globalInput.focus();
             globalInput.value = value;
             globalInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2355,7 +1908,7 @@
         const multifrenchInputs = document.querySelectorAll('input[data-kwyk="multifrench"]');
         if (multifrenchInputs.length > 0) {
             const targetInput = multifrenchInputs[fieldIndex] || multifrenchInputs[0];
-            console.log('[Kwyk Tutor] multifrench input trouvé (index ' + fieldIndex + ')');
+            LOG.debug('multifrench input trouvé (index ' + fieldIndex + ')');
             targetInput.focus();
             targetInput.value = value;
             targetInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2388,18 +1941,18 @@
             for (const inp of textInputs) {
                 if (inp.offsetParent !== null && !inp.id.includes('kwyk')) {
                     field = inp;
-                    console.log('[Kwyk Tutor] Input text trouvé:', inp.id);
+                    LOG.debug('Input text trouvé:', inp.id);
                     break;
                 }
             }
         }
 
         if (!field) {
-            console.error('[Kwyk Tutor] Aucun champ trouvé');
+            LOG.error('Aucun champ trouvé');
             return false;
         }
 
-        console.log('[Kwyk Tutor] Fallback:', field.tagName, field.id || '');
+        LOG.debug('Fallback:', field.tagName, field.id || '');
 
         // Convertir en LaTeX pour le fallback aussi
         const latex = convertToLatex(value);
@@ -2428,7 +1981,7 @@
             const handler = (event) => {
                 if (event.data && event.data.type === callbackId) {
                     window.removeEventListener('message', handler);
-                    console.log('[Kwyk Tutor] Réponse du script injecté:', event.data);
+                    LOG.debug('Réponse du script injecté:', event.data);
                     resolve(event.data.success);
                 }
             };
@@ -2437,12 +1990,12 @@
             // Timeout de sécurité (3 secondes)
             setTimeout(() => {
                 window.removeEventListener('message', handler);
-                console.log('[Kwyk Tutor] Timeout - pas de réponse du script injecté');
+                LOG.debug('Timeout - pas de réponse du script injecté');
                 resolve(false);
             }, 3000);
 
             // Envoyer la demande au script injecté
-            console.log('[Kwyk Tutor] Envoi au script injecté:', latex, 'fieldIndex:', fieldIndex);
+            LOG.debug('Envoi au script injecté:', latex, 'fieldIndex:', fieldIndex);
             window.postMessage({
                 type: 'KWYK_TUTOR_FILL',
                 latex: latex,
@@ -2460,7 +2013,12 @@
      * @param {number} questionIndex - L'index de la question (pour identifier le groupe de radios)
      */
     async function autoFillRadio(block, question, reponse, questionIndex = 0) {
-        console.log('[Kwyk Tutor] autoFillRadio - Question', questionIndex + 1);
+        LOG.debug('autoFillRadio - Question', questionIndex + 1);
+
+        if (isInvalidAnswer(reponse?.reponse)) {
+            LOG.warn('Valeur invalide pour auto-fill radio:', JSON.stringify(reponse?.reponse));
+            return false;
+        }
 
         // Chercher les radios dans le bloc spécifique d'abord
         let radios = block?.querySelectorAll('input[type="radio"]');
@@ -2478,16 +2036,16 @@
             radios = document.querySelectorAll('.exercise_question input[type="radio"], .exercise input[type="radio"]');
         }
         if (radios.length === 0) {
-            console.error('[Kwyk Tutor] Aucun radio button trouvé');
+            LOG.error('Aucun radio button trouvé');
             return false;
         }
 
-        console.log('[Kwyk Tutor] Radios trouvés:', radios.length);
+        LOG.debug('Radios trouvés:', radios.length);
 
         const answer = reponse.reponse.toLowerCase().trim();
         const radioArray = Array.from(radios);
 
-        console.log('[Kwyk Tutor] Réponse à sélectionner:', answer);
+        LOG.debug('Réponse à sélectionner:', answer);
 
         // 1. Essayer par lettre (A, B, C, D) - PRIORITÉ
         if (answer.length === 1 && answer >= 'a' && answer <= 'z') {
@@ -2498,7 +2056,7 @@
                 radio.dispatchEvent(new Event('change', { bubbles: true }));
                 radio.dispatchEvent(new Event('click', { bubbles: true }));
                 highlightElement(radio.closest('label') || radio.parentElement);
-                console.log('[Kwyk Tutor] Radio coché par lettre:', answer.toUpperCase());
+                LOG.debug('Radio coché par lettre:', answer.toUpperCase());
                 return true;
             }
         }
@@ -2513,7 +2071,7 @@
                 radio.dispatchEvent(new Event('change', { bubbles: true }));
                 radio.dispatchEvent(new Event('click', { bubbles: true }));
                 highlightElement(radio.closest('label') || radio.parentElement);
-                console.log('[Kwyk Tutor] Radio coché (exact):', label);
+                LOG.debug('Radio coché (exact):', label);
                 return true;
             }
         }
@@ -2530,7 +2088,7 @@
                 radio.dispatchEvent(new Event('change', { bubbles: true }));
                 radio.dispatchEvent(new Event('click', { bubbles: true }));
                 highlightElement(radio.closest('label') || radio.parentElement);
-                console.log('[Kwyk Tutor] Radio coché (mot entier):', label);
+                LOG.debug('Radio coché (mot entier):', label);
                 return true;
             }
         }
@@ -2546,12 +2104,12 @@
                 radio.dispatchEvent(new Event('change', { bubbles: true }));
                 radio.dispatchEvent(new Event('click', { bubbles: true }));
                 highlightElement(radio.closest('label') || radio.parentElement);
-                console.log('[Kwyk Tutor] Radio coché (premier mot):', label);
+                LOG.debug('Radio coché (premier mot):', label);
                 return true;
             }
         }
 
-        console.warn('[Kwyk Tutor] Radio non trouvé pour:', answer);
+        LOG.warn('Radio non trouvé pour:', answer);
         return false;
     }
 
@@ -2570,7 +2128,14 @@
      * @param {number} questionIndex - L'index de la question
      */
     async function autoFillCheckbox(block, question, reponse, questionIndex = 0) {
-        console.log('[Kwyk Tutor] autoFillCheckbox - Question', questionIndex + 1);
+        LOG.debug('autoFillCheckbox - Question', questionIndex + 1);
+
+        // Pour QCM multiple : vérifier reponse.reponse OU reponse.reponses (array)
+        const hasArrayResponses = Array.isArray(reponse?.reponses) && reponse.reponses.length > 0;
+        if (!hasArrayResponses && isInvalidAnswer(reponse?.reponse)) {
+            LOG.warn('Valeur invalide pour auto-fill checkbox:', JSON.stringify(reponse?.reponse));
+            return false;
+        }
 
         // Chercher les checkboxes avec le bon pattern (id_answer_X_Y)
         let checkboxes = document.querySelectorAll(`input[type="checkbox"][id^="id_answer_${questionIndex}_"]`);
@@ -2586,11 +2151,11 @@
         }
 
         if (checkboxes.length === 0) {
-            console.error('[Kwyk Tutor] Aucune checkbox trouvée');
+            LOG.error('Aucune checkbox trouvée');
             return false;
         }
 
-        console.log('[Kwyk Tutor] Checkboxes trouvées:', checkboxes.length);
+        LOG.debug('Checkboxes trouvées:', checkboxes.length);
 
         // Construire la liste de réponses à cocher
         // D'abord essayer de matcher le texte complet comme un seul label (ex: "Ni constante, ni linéaire")
@@ -2605,7 +2170,7 @@
             : reponse.reponse.split(',').map(a => a.trim().toLowerCase());
         let filled = false;
 
-        console.log('[Kwyk Tutor] Réponses à cocher:', answers, hasExactFullMatch ? '(match exact complet)' : '(split virgule)');
+        LOG.debug('Réponses à cocher:', answers, hasExactFullMatch ? '(match exact complet)' : '(split virgule)');
 
         // Construire un map des options avec leur index (A=0, B=1, C=2, D=3)
         const checkboxArray = Array.from(checkboxes);
@@ -2624,7 +2189,7 @@
                     highlightElement(checkbox.closest('label') || checkbox.parentElement);
                     filled = true;
                     matched = true;
-                    console.log('[Kwyk Tutor] Checkbox coché par lettre:', answer.toUpperCase());
+                    LOG.debug('Checkbox coché par lettre:', answer.toUpperCase());
                 }
             }
 
@@ -2641,7 +2206,7 @@
                         highlightElement(checkbox.closest('label') || checkbox.parentElement);
                         filled = true;
                         matched = true;
-                        console.log('[Kwyk Tutor] Checkbox coché (exact):', label);
+                        LOG.debug('Checkbox coché (exact):', label);
                         break;
                     }
                 }
@@ -2659,14 +2224,14 @@
                         highlightElement(checkbox.closest('label') || checkbox.parentElement);
                         filled = true;
                         matched = true;
-                        console.log('[Kwyk Tutor] Checkbox coché (startsWith):', label);
+                        LOG.debug('Checkbox coché (startsWith):', label);
                         break;
                     }
                 }
             }
 
             if (!matched) {
-                console.warn('[Kwyk Tutor] Checkbox non trouvée pour:', answer);
+                LOG.warn('Checkbox non trouvée pour:', answer);
             }
         }
 
@@ -2704,7 +2269,7 @@
             const match = activeLink.getAttribute('href').match(/\?id=(\d+)/);
             if (match) {
                 const id = parseInt(match[1], 10);
-                console.log(`[Kwyk Tutor] ID exercice extrait (DOM actif): ${id}`);
+                LOG.debug(`ID exercice extrait (DOM actif): ${id}`);
                 return id;
             }
         }
@@ -2715,7 +2280,7 @@
         if (idParam) {
             const id = parseInt(idParam, 10);
             if (!isNaN(id)) {
-                console.log(`[Kwyk Tutor] ID exercice extrait (URL): ${id}`);
+                LOG.debug(`ID exercice extrait (URL): ${id}`);
                 return id;
             }
         }
@@ -2848,33 +2413,42 @@
      */
     async function prefetchAllHomework() {
         // Vérifier les prérequis
+        if (!config.apiKey) {
+            LOG.debug('Prefetch: pas de clé API, abandon');
+            return;
+        }
         const sidebarExercises = parseSidebarExercises();
         if (sidebarExercises.length === 0) {
-            console.log('[Kwyk Tutor] Prefetch: pas de sidebar, abandon');
+            LOG.debug('Prefetch: pas de sidebar, abandon');
             return;
         }
         const baseUrl = detectHomeworkBaseUrl();
         if (!baseUrl) {
-            console.log('[Kwyk Tutor] Prefetch: pas d\'URL de devoir détectée, abandon');
+            LOG.debug('Prefetch: pas d\'URL de devoir détectée, abandon');
             return;
         }
 
         // Filtrer : garder uniquement les exercices non-répondus (Kwyk saute les répondus)
-        const toFetch = sidebarExercises.filter(e => e.status === 'unanswered');
-        if (toFetch.length === 0) {
-            console.log('[Kwyk Tutor] Prefetch: tous les exercices sont déjà répondus');
+        const MAX_PREFETCH = 10; // Cap pour éviter les 429 sur les gros devoirs
+        const toFetchAll = sidebarExercises.filter(e => e.status === 'unanswered');
+        if (toFetchAll.length === 0) {
+            LOG.debug('Prefetch: tous les exercices sont déjà répondus');
             return;
+        }
+        const toFetch = toFetchAll.slice(0, MAX_PREFETCH);
+        if (toFetchAll.length > MAX_PREFETCH) {
+            LOG.debug(`Prefetch: ${toFetchAll.length} exercices non-répondus, limité à ${MAX_PREFETCH}`);
         }
 
         // Éviter les lancements multiples
         if (prefetchInProgress) {
-            console.log('[Kwyk Tutor] Prefetch: déjà en cours, abandon');
+            LOG.debug('Prefetch: déjà en cours, abandon');
             return;
         }
         prefetchInProgress = true;
         prefetchAbortController = new AbortController();
 
-        console.log(`[Kwyk Tutor] Prefetch: lancement pour ${toFetch.length} exercices non-répondus`);
+        LOG.info(`Prefetch: lancement pour ${toFetch.length} exercices non-répondus`);
 
         try {
             // Phase 1 : Fetch batch AJAX (par lots de 4)
@@ -2884,7 +2458,7 @@
                 const batch = toFetch.slice(i, i + 4);
                 const results = await Promise.all(
                     batch.map(e => fetchExerciseData(baseUrl, e.id).catch(err => {
-                        console.warn(`[Kwyk Tutor] Prefetch: échec fetch exercice ${e.id}:`, err.message);
+                        LOG.warn(`Prefetch: échec fetch exercice ${e.id}:`, err.message);
                         return null;
                     }))
                 );
@@ -2893,19 +2467,21 @@
                 });
             }
 
-            console.log(`[Kwyk Tutor] Prefetch: ${fetchedExercises.length}/${toFetch.length} exercices récupérés`);
+            LOG.debug(`Prefetch: ${fetchedExercises.length}/${toFetch.length} exercices récupérés`);
 
-            // Phase 2 : Pour chaque exercice, analyser + appeler IA (3 en parallèle)
-            const CONCURRENCY = 3;
-            for (let i = 0; i < fetchedExercises.length; i += CONCURRENCY) {
+            // Phase 2 : Pour chaque exercice, analyser + appeler IA (séquentiel + délai pour éviter 429)
+            const PREFETCH_DELAY_MS = 350; // ~3 req/s — sous le rate limit Mistral
+            for (let i = 0; i < fetchedExercises.length; i++) {
                 if (prefetchAbortController.signal.aborted) break;
-                const batch = fetchedExercises.slice(i, i + CONCURRENCY);
-                await Promise.all(batch.map(exData => prefetchSolveExercise(exData)));
+                await prefetchSolveExercise(fetchedExercises[i]);
+                if (i < fetchedExercises.length - 1) {
+                    await new Promise(r => setTimeout(r, PREFETCH_DELAY_MS));
+                }
             }
 
-            console.log(`[Kwyk Tutor] Prefetch: terminé. ${Object.keys(prefetchCache).length} exercices en cache`);
+            LOG.info(`Prefetch: terminé. ${Object.keys(prefetchCache).length} exercices en cache`);
         } catch (err) {
-            console.error('[Kwyk Tutor] Prefetch: erreur globale:', err.message);
+            LOG.error('Prefetch: erreur globale:', err.message);
         } finally {
             prefetchInProgress = false;
             prefetchAbortController = null;
@@ -2921,7 +2497,7 @@
 
         // Déjà en cache ?
         if (prefetchCache[exerciseId]) {
-            console.log(`[Kwyk Tutor] Prefetch: exercice ${exerciseId} déjà en cache, skip`);
+            LOG.debug(`Prefetch: exercice ${exerciseId} déjà en cache, skip`);
             return;
         }
 
@@ -2963,6 +2539,7 @@
                     const q = { index, type: 'input', questionType: 'input', label: text.substring(0, 200) || `Question ${index + 1}`, context: text, options: [], inputs: [] };
                     q.questionType = classifyQuestion(q);
                     q.answerFormat = classifyAnswerFormat(q);
+                    q.promptType = detectPromptType(q);
                     questions.push(q);
                 });
             } else {
@@ -2974,7 +2551,7 @@
 
             if (questions.length === 0) {
                 document.body.removeChild(tempDiv);
-                console.warn(`[Kwyk Tutor] Prefetch: exercice ${exerciseId} — aucune question détectée`);
+                LOG.warn(`Prefetch: exercice ${exerciseId} — aucune question détectée`);
                 return;
             }
 
@@ -2997,7 +2574,7 @@
                 prompt += `Figure géométrique de l'exercice:\n${exercise.figureContext}\n\n`;
             }
             exercise.questions.forEach((q, i) => {
-                const promptType = detectPromptType(q);
+                const promptType = q.promptType || detectPromptType(q);
                 prompt += `Question ${i + 1} [type: ${promptType}]:\n`;
                 prompt += `${q.context}\n`;
                 if (q.type === 'qcm' && q.options.length > 0) {
@@ -3013,14 +2590,19 @@
             });
 
             // Déterminer le type de prompt
-            const promptType = questions.length > 0 ? detectPromptType(questions[0]) : exercise.exerciseType;
+            const promptType = questions.length > 0 ? (questions[0].promptType || detectPromptType(questions[0])) : exercise.exerciseType;
             const systemPrompt = getSystemPrompt(promptType, questions[0]?.answerFormat || 'input');
 
             // Tentative de résolution directe (sans IA) — swap temporaire de currentExercise
+            // try/finally : garantie restore même si tryDirectSolve throw
             const savedExercise = currentExercise;
-            currentExercise = exercise;
-            const directSolution = tryDirectSolve();
-            currentExercise = savedExercise;
+            let directSolution;
+            try {
+                currentExercise = exercise;
+                directSolution = tryDirectSolve();
+            } finally {
+                currentExercise = savedExercise;
+            }
             if (directSolution) {
                 prefetchCache[exerciseId] = {
                     solution: directSolution,
@@ -3028,13 +2610,13 @@
                     questions: questions,
                     exercise: exercise
                 };
-                console.log(`[Kwyk Tutor] Prefetch: résolution directe (sans IA) pour exercice ${exerciseId}`);
+                LOG.debug(`Prefetch: résolution directe (sans IA) pour exercice ${exerciseId}`);
                 return;
             }
 
             // Appel IA
-            console.log(`[Kwyk Tutor] Prefetch: appel IA pour exercice ${exerciseId} (type: ${promptType})`);
-            const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+            LOG.debug(`Prefetch: appel IA pour exercice ${exerciseId} (type: ${promptType})`);
+            const response = await fetchWithTimeout('https://api.mistral.ai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -3053,20 +2635,20 @@
             });
 
             if (!response.ok) {
-                console.warn(`[Kwyk Tutor] Prefetch: erreur API pour ${exerciseId}: ${response.status}`);
+                LOG.warn(`Prefetch: erreur API pour ${exerciseId}: ${response.status}`);
                 return;
             }
 
             const aiData = await response.json();
             const content = aiData.choices[0]?.message?.content;
             if (!content) {
-                console.warn(`[Kwyk Tutor] Prefetch: réponse vide pour ${exerciseId}`);
+                LOG.warn(`Prefetch: réponse vide pour ${exerciseId}`);
                 return;
             }
 
             const result = parseAIResponse(content);
             if (result.error) {
-                console.warn(`[Kwyk Tutor] Prefetch: parse échoué pour ${exerciseId}:`, result.error);
+                LOG.warn(`Prefetch: parse échoué pour ${exerciseId}:`, result.error);
                 return;
             }
 
@@ -3077,11 +2659,11 @@
                 questions: questions,
                 exercise: exercise
             };
-            console.log(`[Kwyk Tutor] Prefetch: exercice ${exerciseId} ✓ en cache`);
+            LOG.debug(`Prefetch: exercice ${exerciseId} ✓ en cache`);
 
         } catch (err) {
             if (err.name === 'AbortError') return;
-            console.warn(`[Kwyk Tutor] Prefetch: erreur pour ${exerciseId}:`, err.message);
+            LOG.debug(`Prefetch: erreur pour ${exerciseId}:`, err.message);
         }
     }
 
@@ -3092,7 +2674,7 @@
     function getPrefetchedSolution(exerciseId) {
         const cached = prefetchCache[exerciseId] || prefetchCache[String(exerciseId)];
         if (cached) {
-            console.log(`[Kwyk Tutor] Prefetch cache HIT pour exercice ${exerciseId}`);
+            LOG.debug(`Prefetch cache HIT pour exercice ${exerciseId}`);
             return cached;
         }
         return null;
@@ -3101,23 +2683,6 @@
     /**
      * Annule le prefetch en cours (changement de mode, changement de devoir)
      */
-    function cancelPrefetch() {
-        if (prefetchAbortController) {
-            prefetchAbortController.abort();
-            prefetchAbortController = null;
-        }
-        prefetchInProgress = false;
-        console.log('[Kwyk Tutor] Prefetch annulé');
-    }
-
-    /**
-     * Vide le cache de prefetch (changement de devoir)
-     */
-    function clearPrefetchCache() {
-        prefetchCache = {};
-        console.log('[Kwyk Tutor] Prefetch cache vidé');
-    }
-
     /**
      * Analyse tout le devoir : fetch batch + extraction corrections + IA pour la pédagogie
      */
@@ -3129,7 +2694,7 @@
         const baseUrl = detectHomeworkBaseUrl();
         if (!baseUrl) {
             if (statusEl) statusEl.textContent = 'Erreur : impossible de détecter l\'URL du devoir.';
-            console.error('[Kwyk Tutor] Révision: URL du devoir non détectée');
+            LOG.error('Révision: URL du devoir non détectée');
             return;
         }
 
@@ -3143,7 +2708,7 @@
         if (analyzeBtn) analyzeBtn.disabled = true;
         if (statusEl) statusEl.innerHTML = '<span class="kwyk-spinner"></span> Récupération des exercices (0/' + sidebarExercises.length + ')...';
 
-        console.log('[Kwyk Tutor] Révision: fetch batch de', sidebarExercises.length, 'exercices depuis', baseUrl);
+        LOG.debug('Révision: fetch batch de', sidebarExercises.length, 'exercices depuis', baseUrl);
 
         try {
             // Phase 1 : Fetch tous les exercices en parallèle (par lots de 4)
@@ -3153,7 +2718,7 @@
                 const batch = sidebarExercises.slice(i, i + batchSize);
                 const results = await Promise.all(
                     batch.map(ex => fetchExerciseData(baseUrl, ex.id).catch(err => {
-                        console.warn('[Kwyk Tutor] Révision: erreur fetch exercice', ex.id, err);
+                        LOG.warn('Révision: erreur fetch exercice', ex.id, err);
                         return null;
                     }))
                 );
@@ -3167,12 +2732,12 @@
                 if (statusEl) statusEl.innerHTML = '<span class="kwyk-spinner"></span> Récupération des exercices (' + exerciseDataList.length + '/' + sidebarExercises.length + ')...';
             }
 
-            console.log('[Kwyk Tutor] Révision:', exerciseDataList.length, 'exercices récupérés');
+            LOG.debug('Révision:', exerciseDataList.length, 'exercices récupérés');
 
             // Compter ceux avec/sans correction
             const withCorrection = exerciseDataList.filter(e => e.correction);
             const withoutCorrection = exerciseDataList.filter(e => !e.correction);
-            console.log('[Kwyk Tutor] Révision:', withCorrection.length, 'avec correction,', withoutCorrection.length, 'sans correction');
+            LOG.debug('Révision:', withCorrection.length, 'avec correction,', withoutCorrection.length, 'sans correction');
 
             // Phase 2 : Construire revisionData
             revisionData = exerciseDataList.map(ex => ({
@@ -3196,7 +2761,7 @@
             const exerciseSummaries = revisionData.map((e, i) => {
                 const resultTag = e.correct === 'correct' ? ' [RÉUSSI]' : e.correct === 'incorrect' ? ' [RATÉ]' : '';
                 const reponse = e.correction ? `Réponse correcte: ${e.correction}` : 'Réponse non disponible';
-                return `Exercice ${i + 1}${resultTag}: ${e.enonce.substring(0, 300)}\n${reponse}`;
+                return `[index=${i}]${resultTag}: ${e.enonce.substring(0, 300)}\n${reponse}`;
             }).join('\n---\n');
 
             const synthesisPrompt = `Tu es un professeur de maths niveau Seconde. Voici les exercices d'un devoir Kwyk.
@@ -3231,10 +2796,12 @@ REGLES:
 - "formule": formule cle en LaTeX KaTeX. Chaine vide "" si pas pertinent
 - "point_important": une ASTUCE concrète et actionnable pour éviter le piège le plus courant. Commence par un verbe d'action (ex: "Pense à...", "Vérifie toujours...", "Attention à ne pas..."). 1-2 phrases max.
 - Maximum 6 notions, minimum 1
+- "exercices_indices" : utilise les indices des exercices (le nombre N dans [index=N]). Commence à 0.
+- Regroupe les exercices de CONSTRUCTION/TRACÉ (tracer un vecteur, représenter, construire) dans une notion "Constructions géométriques".
 - NIVEAU SECONDE UNIQUEMENT : JAMAIS de discriminant Delta, JAMAIS de formule quadratique. Utilise factorisation, produit nul, identités remarquables.
 - Utilise les accents français normaux (é, è, ê, à, ù, etc.) dans le texte`;
 
-            const aiResponse = await fetch('https://api.mistral.ai/v1/chat/completions', {
+            const aiResponse = await fetchWithTimeout('https://api.mistral.ai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -3255,14 +2822,14 @@ REGLES:
             if (aiResponse.ok) {
                 const data = await aiResponse.json();
                 const raw = data.choices?.[0]?.message?.content || '';
-                console.log('[Kwyk Tutor] Révision: synthèse brute (200 premiers chars):', raw.substring(0, 200));
-                console.log('[Kwyk Tutor] Révision: synthèse finish_reason:', data.choices?.[0]?.finish_reason);
+                LOG.debug('Révision: synthèse brute (200 premiers chars):', raw.substring(0, 200));
+                LOG.debug('Révision: synthèse finish_reason:', data.choices?.[0]?.finish_reason);
                 const parsed = sanitizeAIJson(raw);
                 if (parsed) {
                     synthesis = parsed;
-                    console.log('[Kwyk Tutor] Révision: synthèse parsée,', (synthesis.notions || []).length, 'notions');
+                    LOG.debug('Révision: synthèse parsée,', (synthesis.notions || []).length, 'notions');
                 } else {
-                    console.warn('[Kwyk Tutor] Révision: échec parsing synthèse IA, brut complet:', raw);
+                    LOG.warn('Révision: échec parsing synthèse IA, brut complet:', raw);
                 }
             }
 
@@ -3270,8 +2837,10 @@ REGLES:
             if (statusEl) statusEl.innerHTML = '<span class="kwyk-spinner"></span> Génération des explications détaillées...';
 
             const exerciseDetails = revisionData.map((e, i) => {
-                const reponse = e.correction || 'Non disponible';
-                return `[Exercice ${i}] Enonce: ${e.enonce.substring(0, 400)}\nReponse Kwyk: ${reponse}`;
+                const reponse = e.correction
+                    || (e.reponses && e.reponses.length > 0 ? e.reponses.map(r => r.reponse || r).join('; ') : null)
+                    || 'Non disponible';
+                return `[Exercice ${i}] Enonce: ${e.enonce.substring(0, 400)}\nReponse: ${reponse}`;
             }).join('\n---\n');
 
             const explanationPrompt = `Professeur de maths SECONDE. Pour CHAQUE exercice, explique la resolution.
@@ -3279,7 +2848,8 @@ REGLES:
 NIVEAU SECONDE OBLIGATOIRE:
 - JAMAIS de discriminant Delta ni formule quadratique (c'est Premiere/Terminale)
 - Equations 2nd degre : FACTORISATION uniquement (identites remarquables, facteur commun, produit nul)
-- La "Reponse Kwyk" est LA bonne reponse, utilise-la dans ta conclusion
+- La "Reponse" est LA bonne reponse, utilise-la dans ta conclusion
+- Pour les exercices sur les VECTEURS : explique la methode geometrique (egalite, colinearite, relation de Chasles, translation). Si la reponse est "Non disponible", explique la methode generale sans donner de valeur specifique.
 
 FORMAT REPONSE FINALE (derniere etape):
 - Si l'enonce dit "ensemble des solutions" ou "determiner l'ensemble" : S = {valeur} ou S = {v1 ; v2}
@@ -3316,7 +2886,7 @@ REGLES STRICTES:
 - Utilise les accents français normaux (é, è, ê, à, ù, etc.)
 - NIVEAU SECONDE : JAMAIS de discriminant Delta ni formule quadratique`;
 
-            const explResponse = await fetch('https://api.mistral.ai/v1/chat/completions', {
+            const explResponse = await fetchWithTimeout('https://api.mistral.ai/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -3337,11 +2907,11 @@ REGLES STRICTES:
                 const explData = await explResponse.json();
                 const explRaw = explData.choices?.[0]?.message?.content || '';
                 const finishReason = explData.choices?.[0]?.finish_reason || '';
-                console.log('[Kwyk Tutor] Révision: finish_reason explications:', finishReason);
-                console.log('[Kwyk Tutor] Révision: explications brutes (200 premiers chars):', explRaw.substring(0, 200));
+                LOG.debug('Révision: finish_reason explications:', finishReason);
+                LOG.debug('Révision: explications brutes (200 premiers chars):', explRaw.substring(0, 200));
                 const explResult = sanitizeAIJson(explRaw);
                 if (explResult) {
-                    console.log('[Kwyk Tutor] Révision: clés parsées:', Object.keys(explResult));
+                    LOG.debug('Révision: clés parsées:', Object.keys(explResult));
                     // L'IA peut retourner les explications sous différentes clés
                     const explanations = explResult.explanations || explResult.explications || explResult.exercises || explResult.exercices ||
                         (Array.isArray(explResult) ? explResult : []);
@@ -3353,12 +2923,12 @@ REGLES STRICTES:
                             revisionData[idx].typeExercice = expl.type_exercice || 'autre';
                         }
                     });
-                    console.log('[Kwyk Tutor] Révision:', explanations.length, 'explications générées sur', revisionData.length, 'exercices');
+                    LOG.debug('Révision:', explanations.length, 'explications générées sur', revisionData.length, 'exercices');
                 } else {
-                    console.error('[Kwyk Tutor] Révision: échec parsing explications IA, réponse brute:', explRaw.substring(0, 300));
+                    LOG.error('Révision: échec parsing explications IA, réponse brute:', explRaw.substring(0, 300));
                 }
             } else {
-                console.error('[Kwyk Tutor] Révision: erreur API explications, status:', explResponse.status);
+                LOG.error('Révision: erreur API explications, status:', explResponse.status);
             }
 
             // Phase 4 : Générer et ouvrir la fiche HTML
@@ -3370,10 +2940,10 @@ REGLES STRICTES:
             if (statusEl) statusEl.textContent = `Fiche générée ! (${withCorrection.length} corrections Kwyk + ${withoutCorrection.length} via IA)`;
             if (analyzeBtn) analyzeBtn.disabled = false;
 
-            console.log('[Kwyk Tutor] Révision: fiche générée avec succès');
+            LOG.debug('Révision: fiche générée avec succès');
 
         } catch (e) {
-            console.error('[Kwyk Tutor] Révision: erreur analyse', e);
+            LOG.error('Révision: erreur analyse', e);
             if (statusEl) statusEl.textContent = 'Erreur lors de l\'analyse.';
             if (analyzeBtn) analyzeBtn.disabled = false;
         }
@@ -3441,7 +3011,7 @@ REGLES STRICTES:
 
         // Essai direct
         try { return JSON.parse(json); } catch (e) {
-            console.log('[Kwyk Tutor] sanitizeAIJson: essai direct échoué:', e.message);
+            LOG.debug('sanitizeAIJson: essai direct échoué:', e.message);
         }
 
         // JSON probablement tronqué — essayer plusieurs points de coupure
@@ -3472,11 +3042,11 @@ REGLES STRICTES:
             attempt = attempt.replace(/,\s*([\]}])/g, '$1');
             try {
                 const result = JSON.parse(attempt);
-                console.log(`[Kwyk Tutor] sanitizeAIJson: récupéré JSON tronqué (coupé à position ${lastBrace})`);
+                LOG.debug(`sanitizeAIJson: récupéré JSON tronqué (coupé à position ${lastBrace})`);
                 return result;
             } catch (e2) { /* essayer le } précédent */ }
         }
-        console.warn('[Kwyk Tutor] sanitizeAIJson: impossible de parser le JSON');
+        LOG.warn('sanitizeAIJson: impossible de parser le JSON');
         return null;
     }
 
@@ -3484,10 +3054,29 @@ REGLES STRICTES:
      * Formate un énoncé mixte texte+maths pour la fiche de révision.
      * Détecte les tokens mathématiques et les entoure de $...$ pour KaTeX.
      */
+    // Supprime tous les blocs JSON commençant par {"clé" dans un texte (bracket-counting).
+    function stripJsonBlobs(text, ...keys) {
+        for (const key of keys) {
+            const marker = '{"' + key + '"';
+            let idx = text.indexOf(marker);
+            while (idx >= 0) {
+                let depth = 0, i = idx;
+                for (; i < text.length; i++) {
+                    const c = text[i];
+                    if (c === '{' || c === '[') depth++;
+                    else if (c === '}' || c === ']') { depth--; if (depth === 0) break; }
+                }
+                text = text.slice(0, idx) + text.slice(i + 1);
+                idx = text.indexOf(marker);
+            }
+        }
+        return text;
+    }
+
     function cleanEnonceForRevision(text) {
         if (!text) return '';
-        // Supprimer les blocs JSON de graphes ({"init": ..., "plot": ...})
-        text = text.replace(/\{"init"\s*:\s*\{[\s\S]*?\}\s*,\s*"plot"\s*:\s*\[[\s\S]*?\]\}/g, '');
+        // Supprimer les blocs JSON de graphes (toutes variantes Kwyk) via bracket-counting
+        text = stripJsonBlobs(text, 'init', 'graphInit');
         // Supprimer les instructions de format ("On donnera...", "On écrira...", "S'il n'y pas...")
         text = text.replace(/\n?\s*On donnera[^\n]*/gi, '');
         text = text.replace(/\n?\s*On écrira[^\n]*/gi, '');
@@ -3495,8 +3084,10 @@ REGLES STRICTES:
         text = text.replace(/\n?\s*On arrondira[^\n]*/gi, '');
         text = text.replace(/\n?\s*On mettra[^\n]*/gi, '');
         text = text.replace(/\n?\s*Donner (la|le|les)[^\n]*sous la forme[^\n]*/gi, '');
-        // Supprimer les marqueurs [Graphique ...] injectés par l'extraction
+        // Supprimer les marqueurs internes injectés par l'extraction
         text = text.replace(/\[Graphique[^\]]*\]/g, '');
+        text = text.replace(/\[Vecteur\s+[^\]]+\]/g, '');
+        text = text.replace(/\[Figure géométrique\s*:[^\]]*\]/g, '');
         // Nettoyer les sauts de ligne multiples
         text = text.replace(/\n{3,}/g, '\n\n').trim();
         return text;
@@ -3507,10 +3098,28 @@ REGLES STRICTES:
         text = cleanEnonceForRevision(text);
 
         let result;
-        // Si l'énoncé contient déjà du LaTeX formaté (\(, \[, \dfrac, \mathbb, \left...),
-        // le passer directement — KaTeX auto-render s'en chargera
-        if (/\\\(|\\\[|\\dfrac|\\mathbb|\\left|\\right|\\frac|\\sqrt/.test(text)) {
-            result = text.replace(/\n/g, '<br>');
+        // Si l'énoncé contient du LaTeX formaté, wrapper les tokens LaTeX en $...$
+        // pour que KaTeX auto-render les traite correctement
+        if (/\\\(|\\\[|\\dfrac|\\mathbb|\\left|\\right|\\frac|\\sqrt|\\overrightarrow|\\vec/.test(text)) {
+            // Remplacer \(...\) et \[...\] par $...$
+            result = text
+                .replace(/\\\[([^]*?)\\\]/g, (_, m) => `$$${m.trim()}$$`)
+                .replace(/\\\(([^]*?)\\\)/g, (_, m) => `$${m.trim()}$`);
+            // Wrapper les tokens LaTeX nus (sans délimiteurs) en $...$
+            // en utilisant des placeholders pour éviter de double-wrapper
+            const mathTokens = [];
+            result = result.replace(
+                /\\(?:overrightarrow|vec|frac|dfrac|sqrt|mathbb|left|right|times|cdot|neq|leq|geq|Rightarrow|Leftrightarrow|infty|text)\{[^}]*\}(?:\{[^}]*\})?|\\(?:times|cdot|neq|leq|geq|Rightarrow|Leftrightarrow|infty)/g,
+                match => {
+                    // Ne pas re-wrapper si déjà dans $...$
+                    mathTokens.push(match);
+                    return `\x00${mathTokens.length - 1}\x00`;
+                }
+            );
+            result = escapeHtmlStatic(result);
+            result = result.replace(/\x00(\d+)\x00/g, (_, i) => `$${mathTokens[parseInt(i)]}$`);
+            result = result.replace(/\$\$([^$]+)\$\$/g, (_, m) => `$$${m}$$`);
+            result = result.replace(/\n/g, '<br>');
         } else {
             // Sinon, détecter les tokens math bruts (25x^2-49=0) et les entourer de $...$
             result = text.replace(/\n/g, '<br>').split(/(\s+)/).map(token => {
@@ -3536,10 +3145,15 @@ REGLES STRICTES:
      */
     function formatMathForRevision(text) {
         if (!text) return '';
-        const t = text.trim();
+        // Supprimer les délimiteurs math externes \(...\), \[...\], $...$
+        let t = text.trim()
+            .replace(/^\\\(/, '').replace(/\\\)$/, '')
+            .replace(/^\\\[/, '').replace(/\\\]$/, '')
+            .replace(/^\$+/, '').replace(/\$+$/, '')
+            .trim();
 
         // Si c'est déjà du LaTeX formaté (\frac, \neq, etc.), tout wrapper en $...$
-        if (/\\(frac|dfrac|sqrt|mathbb|neq|geq|leq|times|text|left|right|Rightarrow|Leftrightarrow|infty|setminus|emptyset|quad|cdot)/.test(t)) {
+        if (/\\(frac|dfrac|sqrt|mathbb|neq|geq|leq|times|text|left|right|Rightarrow|Leftrightarrow|infty|setminus|emptyset|quad|cdot|overrightarrow|vec)/.test(t)) {
             return `$${t}$`;
         }
 
@@ -3550,7 +3164,8 @@ REGLES STRICTES:
         if (!hasFrenchWords && (hasMath || /\([^)]+\)\/\([^)]+\)/.test(t) || /^[\d;,\s+\-.()\/^{}=*×÷S]+$/.test(t))) {
             // Pur math — tout en $...$
             let latex = t;
-            latex = latex.replace(/→/g, ' \\rightarrow ');
+            latex = latex.replace(/([A-Z]{1,2}|[a-z])\u2192/g, '\\overrightarrow{$1}');
+            latex = latex.replace(/\u2192/g, ' \\rightarrow ');
             latex = latex.replace(/\*\*/g, '^');
             latex = latex.replace(/\*/g, ' \\times ');
             latex = latex.replace(/\(([^)]+)\)\/\(([^)]+)\)/g, '\\frac{$1}{$2}');
@@ -3605,7 +3220,7 @@ REGLES STRICTES:
                 blocks.push(`<div class="revision-step">
                     <div class="revision-step-num">${stepNum}</div>
                     <div class="revision-step-content">
-                        ${e.titre ? `<div class="revision-step-titre">${escapeHtmlStatic(e.titre)}</div>` : ''}
+                        ${e.titre ? `<div class="revision-step-titre">${formatEnonceForRevision(e.titre)}</div>` : ''}
                         ${calculsHTML ? `<div class="revision-step-calculs">${calculsHTML}</div>` : ''}
                     </div>
                 </div>`);
@@ -3642,7 +3257,7 @@ REGLES STRICTES:
             : ex.correct === 'incorrect' ? ' <span class="revision-result-badge incorrect">Raté</span>' : '';
         const topicLabel = TYPE_EXERCICE_LABELS[ex.typeExercice] || ex.typeExercice || '';
         const topicBadge = topicLabel ? `<span class="revision-topic-badge">${escapeHtmlStatic(topicLabel)}</span>` : '';
-        const regleHTML = ex.regle ? `<div class="revision-exercise-regle"><strong>Propriété :</strong> ${escapeHtmlWithBold(ex.regle)}</div>` : '';
+        const regleHTML = ex.regle ? `<div class="revision-exercise-regle"><strong>Propriété :</strong> ${formatEnonceForRevision(ex.regle)}</div>` : '';
         const exLabel = ex.shownId ? `Exo ${escapeHtmlStatic(ex.shownId)}` : `Exemple ${index + 1}`;
         const sourceTag = ex.correction ? '<span class="revision-source-badge kwyk">Kwyk</span>' : '';
 
@@ -3700,7 +3315,7 @@ REGLES STRICTES:
                         <span class="revision-badge">${indices.length} ex.</span>
                     </div>
                     <div class="revision-notion-content" id="notion-content-${ni}" style="display:none;">
-                        ${propriete ? `<div class="revision-propriete"><strong>Propriété :</strong> ${escapeHtmlWithBold(propriete)}</div>` : ''}
+                        ${propriete ? `<div class="revision-propriete"><strong>Propriété :</strong> ${formatEnonceForRevision(propriete)}</div>` : ''}
                         ${exemple ? `<div class="revision-exemple-cours"><strong>Exemple :</strong> ${formatEnonceForRevision(exemple)}</div>` : ''}
                         ${formule ? `<div class="revision-formule">$$${formule}$$</div>` : ''}
                         <div class="revision-exemples">
@@ -4264,132 +3879,162 @@ REGLES STRICTES:
     }
 
     // Comme escapeHtmlStatic mais convertit **bold** → <strong>bold</strong>
-    function escapeHtmlWithBold(text) {
-        if (!text) return '';
-        return escapeHtmlStatic(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    /**
+     * Vérifie si l'exercice est bloqué via l'admin (remoteConfig.blocked_exercises).
+     * Fonction pure — aucun effet de bord UI.
+     * @returns {{ blockedMode: string, message: string } | null}
+     */
+    function getAdminBlock(exerciseId, currentMode) {
+        if (!exerciseId || !remoteConfig.blocked_exercises) return null;
+        // Normaliser l'ID en Number pour comparaison stricte (gère IDs string dans le Gist)
+        const targetId = Number(exerciseId);
+        if (Number.isNaN(targetId)) return null;
+        const entry = remoteConfig.blocked_exercises.find(e => {
+            const eId = Number(typeof e === 'object' ? e.id : e);
+            return eId === targetId;
+        });
+        if (!entry) return null;
+        const isBlocked = typeof entry === 'number'
+            || entry.mode === 'both'
+            || entry.mode === currentMode;
+        if (!isBlocked) return null;
+        const blockedMode = typeof entry === 'object' ? entry.mode : 'both';
+        const message = blockedMode === 'both'
+            ? '🚫 Exercice bloqué !'
+            : blockedMode === 'triche'
+                ? '🚫 Exercice bloqué en mode troll. Passe en mode pédagogique !'
+                : '🚫 Exercice bloqué en mode pédagogique. Passe en mode troll !';
+        return { blockedMode, message };
+    }
+
+    /**
+     * Vérifie si l'exercice contient un mot-clé non supporté.
+     * Fonction pure — aucun effet de bord UI.
+     * Retourne le mot-clé déclencheur ou null si supporté.
+     * Les types tableau_signes/variations sont toujours supportés
+     * même si leur texte contient 'tracer ' (ex: "Tracer le tableau de signes de f").
+     */
+
+    /**
+     * Détecte si l'exercice courant a déjà été répondu.
+     * Signaux DOM Kwyk (confirmés) :
+     *   - button.exercise_submit[disabled] + button.exercise_next sans disabled → validé
+     *   - #sequence_left a.active i.correct → sidebar marque l'exo comme correct
+     * Retourne true si au moins un signal fort est présent.
+     */
+    function isExerciseAlreadyAnswered() {
+        const submitBtn = document.querySelector('button.exercise_submit');
+        const nextBtn   = document.querySelector('button.exercise_next');
+
+        // Signal 1 (le plus fiable) : submit disabled + next actif
+        if (submitBtn && nextBtn) {
+            if (submitBtn.hasAttribute('disabled') && !nextBtn.hasAttribute('disabled')) {
+                return true;
+            }
+        }
+
+        // Signal 2 : icône correct dans la sidebar pour l'exercice actif
+        if (document.querySelector('#sequence_left a.active i.correct')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function isExerciseUnsupported(exercise) {
+        if (!exercise) return null;
+        const unsupportedKeywords = [
+            'tracer ',           // constructions graphiques (avec espace, catch-all)
+            'placer les points',
+            'glisser-déposer',
+            'faire glisser',
+            'construire ',       // constructions géométriques (avec espace, catch-all)
+            // '[tableau]' retiré — tableau_valeurs a un prompt dédié (cheat bloqué séparément)
+        ];
+        const exType = exercise.exerciseType || exercise.questions?.[0]?.questionType;
+        if (exType === 'tableau_signes' || exType === 'tableau_variations' || exType === 'tableau_valeurs') return null;
+        // Fallback DOM direct : q.label peut remplacer le texte par [Figure géométrique] → "construire" perdu
+        const domText = Array.from(document.querySelectorAll('.exercise_question'))
+            .map(el => el.textContent).join(' ');
+        const text = ((exercise.texte || '') + ' ' + domText).toLowerCase();
+        return unsupportedKeywords.find(kw => text.includes(kw)) || null;
     }
 
     function checkUnsupportedExercise(autoSkip = false) {
         if (!currentExercise) return false;
 
-        const warningEl = null; // supprimé
         const actionsEl = document.getElementById('kwyk-actions');
         const responseEl = document.getElementById('kwyk-response');
         const cheatSection = document.getElementById('kwyk-cheat-section');
 
-        // V16: Vérifier si l'exercice est bloqué par ID via admin
+        // --- 1. Blocage admin ---
         const exerciseId = extractExerciseIdFromUrl();
-        const blockedEntry = exerciseId && remoteConfig.blocked_exercises &&
-            remoteConfig.blocked_exercises.find(e => (typeof e === 'object' ? e.id : e) === exerciseId);
-        const currentMode = (config.mode === 'triche' && cheatModeActive) ? 'triche' : 'pedagogique';
-        const isExerciseBlocked = blockedEntry && (
-            typeof blockedEntry === 'number' ||
-            blockedEntry.mode === 'both' ||
-            blockedEntry.mode === currentMode
-        );
-        if (isExerciseBlocked) {
-            console.log(`[Kwyk Tutor] Exercice bloqué par admin (ID: ${exerciseId}, mode: ${currentMode})`);
+        const currentMode = config.mode === 'revision' ? 'revision'
+            : (config.mode === 'triche' && cheatModeActive) ? 'triche'
+            : 'pedagogique';
+        const adminBlock = getAdminBlock(exerciseId, currentMode);
 
-            const blockedMode = typeof blockedEntry === 'object' ? blockedEntry.mode : 'both';
-            const blockedMsg = blockedMode === 'both'
-                ? '🚫 Exercice bloqué !'
-                : blockedMode === 'triche'
-                    ? '🚫 Exercice bloqué en mode triche. Passe en mode pédagogique !'
-                    : '🚫 Exercice bloqué en mode pédagogique. Passe en mode triche !';
-
+        if (adminBlock) {
+            LOG.warn(`Exercice bloqué par admin (ID: ${exerciseId}, mode: ${currentMode})`);
             if (config.mode === 'triche') {
-                // Mode triche : garder la section visible, afficher le message dans le status
                 if (actionsEl) actionsEl.style.display = 'none';
                 if (responseEl) responseEl.style.display = 'none';
                 if (cheatSection) cheatSection.style.display = 'block';
-
                 const switchEl = document.getElementById('kwyk-cheat-switch');
-                if (switchEl) {
-                    switchEl.checked = false;
-                    switchEl.disabled = true;
-                }
+                if (switchEl) { switchEl.checked = false; switchEl.disabled = true; }
                 cheatModeActive = false;
-                updateCheatStatus(blockedMsg, 'error');
+                updateCheatStatus(adminBlock.message, 'error');
             } else if (config.mode !== 'revision') {
-                // Mode pédagogique : afficher le message dans la zone de réponse
                 if (actionsEl) actionsEl.style.display = 'none';
                 if (cheatSection) cheatSection.style.display = 'none';
                 if (responseEl) {
                     responseEl.style.display = 'block';
-                    responseEl.innerHTML = `<div class="kwyk-bubble error">${blockedMsg}</div>`;
+                    responseEl.innerHTML = `<div class="kwyk-bubble error">${adminBlock.message}</div>`;
                 }
             }
-
             return true;
         }
 
-        // Exercices non supportés : constructions géométriques, drag&drop, tableaux de valeurs
-        const unsupportedKeywords = [
-            'tracer ',       // constructions graphiques (avec espace, catch-all)
-            'placer les points',
-            'glisser-déposer',
-            'faire glisser',
-            'construire ',   // constructions géométriques (avec espace, catch-all)
-            '[tableau]',     // tableau de valeurs (non supporté — marqueur DOM interne)
-        ];
+        // --- 2. Exercice non supporté (keywords) ---
+        const unsupportedKw = isExerciseUnsupported(currentExercise);
+        if (unsupportedKw) {
+            LOG.warn(`Exercice non supporté détecté: "${unsupportedKw}"`);
 
-        const exerciseText = currentExercise.texte.toLowerCase();
-
-        for (const keyword of unsupportedKeywords) {
-            if (exerciseText.includes(keyword)) {
-                console.log(`[Kwyk Tutor] Exercice non supporté détecté: "${keyword}"`);
-
-                // v22: Auto-skip si mode triche actif avec auto-validate ET auto-next
-                if (autoSkip && cheatModeActive && config.cheatAutoValidate && config.cheatAutoNext) {
-                    console.log('[Kwyk Tutor] Auto-skip exercice non supporté...');
-                    updateCheatStatus('Exercice non supporté, skip...', 'loading');
-
-                    // Attendre un peu puis passer au suivant
-                    setTimeout(async () => {
-                        const nextBtn = document.querySelector('button.exercise_next');
-                        if (nextBtn) {
-                            nextBtn.click();
-                            console.log('[Kwyk Tutor] Auto-skip: Bouton Suivant cliqué');
-                            updateCheatStatus('Skipped !', 'success');
-                        } else {
-                            updateCheatStatus('Exercice non supporté', 'error');
-                        }
-                    }, 200);
-
-                    return true;
-                }
-
-                // Masquer TOUS les contrôles (boutons ET switch triche)
-                if (actionsEl) actionsEl.style.display = 'none';
-                if (cheatSection) cheatSection.style.display = 'none';
-                if (config.mode !== 'revision' && responseEl) {
-                    responseEl.style.display = 'block';
-                    responseEl.innerHTML = '<div class="kwyk-bubble error">⚠️ Exercice non supporté</div>';
-                }
-
-                // v24: Désactiver ET bloquer le switch triche pour exercices non supportés
-                console.log('[Kwyk Tutor] Désactivation du mode triche (exercice non supporté)');
-                cheatModeActive = false;
-                const switchEl = document.getElementById('kwyk-cheat-switch');
-                if (switchEl) {
-                    switchEl.checked = false;
-                    switchEl.disabled = true; // Empêcher de réactiver
-                }
-                updateCheatStatus('Exercice non supporté', 'error');
-
+            if (autoSkip && cheatModeActive && config.cheatAutoValidate && config.cheatAutoNext) {
+                LOG.debug('Auto-skip exercice non supporté...');
+                updateCheatStatus('Exercice non supporté, skip...', 'loading');
+                setTimeout(async () => {
+                    const nextBtn = document.querySelector('button.exercise_next');
+                    if (nextBtn) {
+                        nextBtn.click();
+                        LOG.debug('Auto-skip: Bouton Suivant cliqué');
+                        updateCheatStatus('Skipped !', 'success');
+                    } else {
+                        updateCheatStatus('Exercice non supporté', 'error');
+                    }
+                }, 200);
                 return true;
             }
+
+            if (actionsEl) actionsEl.style.display = 'none';
+            if (cheatSection) cheatSection.style.display = 'none';
+            if (config.mode !== 'revision' && responseEl) {
+                responseEl.style.display = 'none';
+                responseEl.innerHTML = '';
+            }
+            LOG.warn('Désactivation du mode triche (exercice non supporté)');
+            cheatModeActive = false;
+            const switchEl = document.getElementById('kwyk-cheat-switch');
+            if (switchEl) { switchEl.checked = false; switchEl.disabled = true; }
+            updateStatus('⚠️ Exercice non supporté', 'error'); // Remplace "Nouvel exercice !"
+            updateCheatStatus('', ''); // Reset badge troll
+            return true;
         }
 
-        // Exercice supporté - respecter le mode actuel
-
-        // v24: Réactiver le switch triche pour exercices supportés
+        // --- 3. Exercice supporté — restaurer l'UI ---
         const switchEl = document.getElementById('kwyk-cheat-switch');
-        if (switchEl) {
-            switchEl.disabled = false; // Permettre d'activer le mode triche
-        }
+        if (switchEl) switchEl.disabled = false;
 
-        // Restaurer l'UI selon le mode
         if (config.mode === 'triche') {
             if (cheatSection) cheatSection.style.display = 'block';
             if (actionsEl) actionsEl.style.display = 'none';
@@ -4405,8 +4050,43 @@ REGLES STRICTES:
         return false;
     }
 
+    /**
+     * Affiche un encadré "Exercice déjà répondu" si l'exercice courant a déjà été validé.
+     * - Désactive le mode triche (switch + section cachés)
+     * - Garde les boutons pédagogiques accessibles
+     * - Retourne true si détecté (permet au flow amont de court-circuiter le pendingCheatMode)
+     */
+    function checkAlreadyAnswered() {
+        if (!isExerciseAlreadyAnswered()) return false;
+
+        LOG.info('[Kwyk Tutor] Exercice déjà répondu détecté');
+
+        const actionsEl    = document.getElementById('kwyk-actions');
+        const responseEl   = document.getElementById('kwyk-response');
+        const cheatSection = document.getElementById('kwyk-cheat-section');
+        const switchEl     = document.getElementById('kwyk-cheat-switch');
+
+        // Désactiver le mode triche
+        if (switchEl) { switchEl.checked = false; switchEl.disabled = true; }
+        cheatModeActive = false;
+        if (cheatSection) cheatSection.style.display = 'none';
+        updateCheatStatus('', '');
+
+        // Cacher les boutons d'action, afficher encadré visible dans responseEl
+        if (config.mode !== 'revision') {
+            if (actionsEl) actionsEl.style.display = 'none';
+            if (responseEl) {
+                responseEl.style.display = 'block';
+                responseEl.innerHTML = '<div class="kwyk-bubble success" style="text-align:center;padding:16px;">✅ <strong>Exercice déjà répondu</strong><br><span style="font-size:12px;opacity:0.8;">Tu as déjà validé cet exercice.</span></div>';
+            }
+        }
+
+        updateStatus('✅ Exercice déjà répondu', 'success');
+        return true;
+    }
+
     // ===========================================
-    // V15: CLASSIFICATION DU TYPE D'EXERCICE
+    // CLASSIFICATION DU TYPE D'EXERCICE
     // ===========================================
 
     /**
@@ -4423,14 +4103,18 @@ REGLES STRICTES:
         // Mots-clés textuels (priorité haute)
         if (text.includes('[graphique')) return 'graphique';
 
-        const signesKeywords = ['tableau de signes', 'tableau de signe', 'compléter le tableau de signes', 'signe de'];
-        for (const kw of signesKeywords) {
-            if (text.includes(kw)) return 'tableau_signes';
-        }
+        // Tableaux : uniquement si pas d'input DOM standard.
+        // "signe de f sur [a;b]" avec un input = valeur demandée, pas tableau à remplir.
+        if (question.type !== 'input') {
+            const signesKeywords = ['tableau de signes', 'tableau de signe', 'tableaux de signes', 'tableaux de signe', 'compléter le tableau de signes', 'signe de'];
+            for (const kw of signesKeywords) {
+                if (text.includes(kw)) return 'tableau_signes';
+            }
 
-        const variationsKeywords = ['tableau de variations', 'tableau de variation', 'compléter le tableau de variations', 'variations de'];
-        for (const kw of variationsKeywords) {
-            if (text.includes(kw)) return 'tableau_variations';
+            const variationsKeywords = ['tableau de variations', 'tableau de variation', 'tableaux de variations', 'tableaux de variation', 'compléter le tableau de variations', 'variations de'];
+            for (const kw of variationsKeywords) {
+                if (text.includes(kw)) return 'tableau_variations';
+            }
         }
 
         if (text.includes('[tableau]')) return 'tableau_valeurs';
@@ -4486,7 +4170,6 @@ REGLES STRICTES:
             q.questionType = classifyQuestion(q);
             q.answerFormat = classifyAnswerFormat(q);
             types.add(q.questionType);
-            console.log(`[Kwyk Tutor] Q${i + 1} type: ${q.questionType} | format: ${q.answerFormat}`);
         });
 
         // Fallback global si toutes les questions sont unknown
@@ -4497,6 +4180,7 @@ REGLES STRICTES:
                 if (questions.length > 0 && questions[0].type === 'unknown') {
                     questions[0].type = 'checkbox';
                     questions[0].answerFormat = 'qcm_multiple';
+                    questions[0].questionType = 'qcm_multiple';
                     globalCheckboxes.forEach(cb => {
                         const label = extractLabelWithMath(cb.labels?.[0] || cb.parentElement);
                         questions[0].options.push({ value: cb.value, label: label, id: cb.id });
@@ -4509,6 +4193,7 @@ REGLES STRICTES:
                 if (questions.length > 0 && questions[0].type === 'unknown') {
                     questions[0].type = 'qcm';
                     questions[0].answerFormat = 'qcm_simple';
+                    questions[0].questionType = 'qcm_simple';
                     globalRadios.forEach(radio => {
                         const label = extractLabelWithMath(radio.labels?.[0] || radio.parentElement);
                         questions[0].options.push({ value: radio.value, label: label, id: radio.id });
@@ -4521,10 +4206,11 @@ REGLES STRICTES:
                 if (questions.length > 0) {
                     questions[0].type = 'input';
                     questions[0].answerFormat = 'input';
+                    questions[0].questionType = 'input'; // Fix: classifyQuestion a déjà tourné, mettre à jour manuellement
                 }
                 return 'input';
             }
-            console.log('[Kwyk Tutor] Type non identifié — fallback unknown');
+            LOG.debug('Type non identifié — fallback unknown');
             return 'unknown';
         }
 
@@ -4532,9 +4218,22 @@ REGLES STRICTES:
         const nonUnknownTypes = [...types].filter(t => t !== 'unknown');
         if (nonUnknownTypes.length === 0) return 'unknown';
 
-        // Chaque question a déjà son questionType individuel
         // Le type global = type de la première question (pour l'affichage initial)
-        return questions[0].questionType || nonUnknownTypes[0];
+        const globalType = questions[0].questionType || nonUnknownTypes[0];
+
+        // Propager tableau_signes/variations aux questions unknown — fire dès qu'UNE question est tableau
+        // (ex: Q1=input, Q2=tableau_signes, Q3=unknown → Q3 doit hériter de Q2)
+        const tableauType = nonUnknownTypes.find(t => t === 'tableau_signes' || t === 'tableau_variations');
+        if (tableauType) {
+            questions.forEach(q => {
+                if (q.questionType === 'unknown') q.questionType = tableauType;
+            });
+        }
+
+        // Stocker promptType après propagation (questionType est final à ce stade)
+        questions.forEach(q => { q.promptType = detectPromptType(q); });
+
+        return globalType;
     }
 
     // ===========================================
@@ -4594,7 +4293,7 @@ REGLES STRICTES:
         });
 
         if (exercise.questions.length === 0) {
-            console.log('[Kwyk Tutor] detectFigureExercise: aucune question extraite');
+            LOG.debug('detectFigureExercise: aucune question extraite');
             currentExercise = null;
             return;
         }
@@ -4607,6 +4306,7 @@ REGLES STRICTES:
 
         updatePreview(`${exercise.questions.length} question(s) [figure géométrique]`);
         checkUnsupportedExercise();
+        checkAlreadyAnswered();
 
         if (exercise.questions.length > 1) {
             createQuestionNavigation(exercise.questions.length);
@@ -4614,12 +4314,12 @@ REGLES STRICTES:
             document.getElementById('kwyk-question-nav').style.display = 'none';
         }
 
-        console.log('[Kwyk Tutor] Exercice figure+panels:', currentExercise);
+        LOG.debug('Exercice figure+panels:', currentExercise);
 
         if (pendingCheatMode && cheatModeActive) {
             pendingCheatMode = false;
             if (checkUnsupportedExercise(true)) {
-                console.log('[Kwyk Tutor] Exercice bloqué/non supporté');
+                LOG.debug('Exercice bloqué/non supporté');
             } else {
                 updateCheatStatus('Chargement...', 'loading');
                 (async () => {
@@ -4639,25 +4339,25 @@ REGLES STRICTES:
     // ===========================================
 
     function detectExercise() {
-        console.log('[Kwyk Tutor] Detection exercice...');
+        LOG.debug('Detection exercice...');
 
         // Chercher les blocs .exercise_question
         const exerciseBlocks = document.querySelectorAll('.exercise_question');
         
         if (exerciseBlocks.length === 0) {
-            console.log('[Kwyk Tutor] Aucun bloc .exercise_question trouve');
+            LOG.debug('Aucun bloc .exercise_question trouve');
             updatePreview('Aucun exercice trouve sur cette page.');
             currentExercise = null;
             return;
         }
 
-        console.log(`[Kwyk Tutor] ${exerciseBlocks.length} bloc(s) .exercise_question detecte(s)`);
+        LOG.debug(`${exerciseBlocks.length} bloc(s) .exercise_question detecte(s)`);
 
         // Détecter structure "figure + exercise_right_panel" (fill-in-blank avec figure géométrique)
         const multifrenchPanels = [...document.querySelectorAll('.exercise_right_panel')]
             .filter(p => p.querySelector('input[data-kwyk="multifrench"]'));
         if (multifrenchPanels.length > 0) {
-            console.log('[Kwyk Tutor] Structure figure+panels détectée:', multifrenchPanels.length, 'question(s)');
+            LOG.debug('Structure figure+panels détectée:', multifrenchPanels.length, 'question(s)');
             detectFigureExercise(exerciseBlocks, multifrenchPanels);
             return;
         }
@@ -4679,7 +4379,7 @@ REGLES STRICTES:
         });
 
         if (exercise.questions.length === 0) {
-            console.log('[Kwyk Tutor] Aucune question detectée');
+            LOG.debug('Aucune question detectée');
             updatePreview('Impossible de detecter les questions.');
             currentExercise = null;
             return;
@@ -4696,17 +4396,18 @@ REGLES STRICTES:
         // Assigner un ID stable (URL > hash de l'énoncé)
         exercise.exerciseId = extractExerciseIdFromUrl() || hashCode(exercise.texte);
 
-        // V15: Classifier le type d'exercice
+        // Classifier le type d'exercice
         exercise.exerciseType = classifyExercise(exercise.questions, exerciseBlocks);
-        console.log(`[Kwyk Tutor] Classification V15: ${exercise.exerciseType}`);
+        LOG.info(`Classification: ${exercise.exerciseType} | ${exercise.questions.map((q,i) => `Q${i+1}=${q.questionType}`).join(' ')}`);
 
         currentExercise = exercise;
         window._kwykGetState; // keep reference live (state reads directly from closure)
         const currentQ = exercise.questions[currentQuestionIndex] || exercise.questions[0];
-        updatePreview(`${exercise.questions.length} question(s) détectée(s) [${currentQ?.questionType || exercise.exerciseType}]`);
+        updatePreview(`${exercise.questions.length} question(s) détectée(s) [${getAnswerFormatLabel(currentQ, exercise.exerciseType)}]`);
 
         // Vérifier si l'exercice est supporté
         checkUnsupportedExercise();
+        checkAlreadyAnswered();
 
         // Afficher la navigation si plusieurs questions
         if (exercise.questions.length > 1) {
@@ -4715,17 +4416,17 @@ REGLES STRICTES:
             document.getElementById('kwyk-question-nav').style.display = 'none';
         }
 
-        console.log('[Kwyk Tutor] Exercice detecte:', currentExercise);
+        LOG.debug('Exercice detecte:', currentExercise);
 
         // Si le mode triche était en attente, le lancer maintenant
-        // v24: Vérifier d'abord si l'exercice est supporté AVANT de lancer l'IA
+        // Vérifier d'abord si l'exercice est supporté AVANT de lancer l'IA
         if (pendingCheatMode && cheatModeActive) {
             pendingCheatMode = false;
-            // Vérifier si exercice bloqué ou non supporté avant de lancer l'IA
-            if (checkUnsupportedExercise(true)) {
-                console.log('[Kwyk Tutor] Exercice bloqué/non supporté, pas de résolution auto');
+            // Vérifier si exercice bloqué, non supporté ou déjà répondu avant de lancer l'IA
+            if (checkUnsupportedExercise(true) || checkAlreadyAnswered()) {
+                LOG.debug('Exercice bloqué/non supporté/déjà répondu, pas de résolution auto');
             } else {
-                console.log('[Kwyk Tutor] Mode triche en attente, attente page complète...');
+                LOG.debug('Mode triche en attente, attente page complète...');
                 updateCheatStatus('Chargement...', 'loading');
                 (async () => {
                     await waitForCondition(() => {
@@ -4759,7 +4460,7 @@ REGLES STRICTES:
         const clonedBlock = block.cloneNode(true);
         clonedBlock.querySelectorAll('label').forEach(l => l.remove());
 
-        // V14: Formater les tableaux prettytable pour l'IA
+        // Formater les tableaux prettytable pour l'IA
         clonedBlock.querySelectorAll('table.prettytable').forEach(table => {
             const rows = [...table.querySelectorAll('tr')];
             const formattedRows = rows.map(row => {
@@ -4770,10 +4471,10 @@ REGLES STRICTES:
             table.replaceWith(document.createTextNode(tableText));
         });
 
-        // V14: Extraire les fonctions des graphiques Raphaël (représentations graphiques)
+        // Extraire les fonctions des graphiques Raphaël (représentations graphiques)
         // Les graphes Raphaël contiennent un JSON avec "plot": [["function(x){ return ...}", [min, max]]]
         // On remplace tout le bloc SVG + JSON par un texte lisible "Graphique X : y = ..."
-        // V17: Extraction de TOUTES les courbes du plot (pas seulement plot[0])
+        // Extraction de TOUTES les courbes du plot (pas seulement plot[0])
         //      Nommage via config.label (ex: \mathcal{C}_f → "f") en faisant correspondre les couleurs
         const graphSpans = clonedBlock.querySelectorAll('span, div.figure-data');
         let graphLetterIndex = 0;
@@ -4826,12 +4527,14 @@ REGLES STRICTES:
                 } catch(e) {
                     // JSON invalide, on laisse tel quel
                 }
-            } else if (text.includes('"line"') && text.includes('"init"')) {
-                // V18: Format "line" (vecteurs sur quadrillage)
-                // {"init":{...},"line":[[[x1,y1],[x2,y2],{"stroke":"#color","subtype":"vector"}],...],"label":[...]}
+            } else if (text.includes('"line"') && (text.includes('"init"') || text.includes('"graphInit"'))) {
+                // Format "line" (vecteurs sur quadrillage)
+                // V18.7+: Format "graphInit" (droite graduée — points nommés, pas de vecteurs)
+                // {"init":{...},"line":[...],"label":[...]} ou {"graphInit":{...},"line":[...],"label":[...]}
                 try {
                     // Bracket-counting pour extraire le JSON même si du texte (labels) précède
-                    const jsonStart = text.indexOf('{"init"');
+                    let jsonStart = text.indexOf('{"init"');
+                    if (jsonStart < 0) jsonStart = text.indexOf('{"graphInit"');
                     if (jsonStart < 0) throw new Error('no JSON');
                     let depth = 0, jsonEnd = -1;
                     for (let i = jsonStart; i < text.length; i++) {
@@ -4879,6 +4582,27 @@ REGLES STRICTES:
                                 });
                             }
                             graphLetterIndex++;
+                        } else if (parsed.graphInit !== undefined && Array.isArray(parsed.label)) {
+                            // Format "graphInit" (droite graduée) : labels = [[x,y], "A", "above"]
+                            // Extraire les points nommés (lettres majuscules uniquement)
+                            const pointParts = [];
+                            parsed.label.forEach(lbl => {
+                                const name = String(lbl[1] || '').trim();
+                                if (/^[A-Z]$/.test(name) && Array.isArray(lbl[0])) {
+                                    const x = lbl[0][0], y = lbl[0][1] || 0;
+                                    pointParts.push(`${name}(${x};${y})`);
+                                }
+                            });
+                            if (pointParts.length > 0) {
+                                span.textContent = `\n[Figure géométrique : ${pointParts.join(', ')}]\n`;
+                                const parent = span.parentElement;
+                                if (parent) {
+                                    Array.from(parent.querySelectorAll('span[style*="position"]')).forEach(s => {
+                                        if (s !== span) s.remove();
+                                    });
+                                }
+                                graphLetterIndex++;
+                            }
                         }
                     }
                 } catch(e) {
@@ -4979,7 +4703,7 @@ REGLES STRICTES:
             }
             if (globalRadios.length > 0) {
                 radios = globalRadios;
-                console.log(`[Kwyk Tutor] Q${index + 1}: Radios trouvés HORS du bloc`);
+                LOG.debug(`Q${index + 1}: Radios trouvés HORS du bloc`);
             }
         }
 
@@ -4991,7 +4715,7 @@ REGLES STRICTES:
             }
             if (globalCheckboxes.length > 0) {
                 checkboxes = globalCheckboxes;
-                console.log(`[Kwyk Tutor] Q${index + 1}: Checkboxes trouvés HORS du bloc (${checkboxes.length} options)`);
+                LOG.debug(`Q${index + 1}: Checkboxes trouvés HORS du bloc (${checkboxes.length} options)`);
             }
         }
 
@@ -5000,7 +4724,7 @@ REGLES STRICTES:
             const globalTextInput = document.querySelector(`input[type="text"][id="id_answer_${index}"]`);
             if (globalTextInput) {
                 textInputs = [globalTextInput];
-                console.log(`[Kwyk Tutor] Q${index + 1}: Input text trouvé HORS du bloc (id_answer_${index})`);
+                LOG.debug(`Q${index + 1}: Input text trouvé HORS du bloc (id_answer_${index})`);
             }
         }
 
@@ -5019,7 +4743,7 @@ REGLES STRICTES:
                 });
             });
 
-            console.log(`[Kwyk Tutor] Q${index + 1}: QCM avec ${question.options.length} options`, question.options);
+            LOG.debug(`Q${index + 1}: QCM avec ${question.options.length} options`, question.options);
         }
         else if (checkboxes.length > 0) {
             question.type = 'checkbox';
@@ -5035,7 +4759,7 @@ REGLES STRICTES:
                 });
             });
 
-            console.log(`[Kwyk Tutor] Q${index + 1}: Checkbox avec ${question.options.length} options`);
+            LOG.debug(`Q${index + 1}: Checkbox avec ${question.options.length} options`);
         }
         else if (textInputs.length > 0) {
             question.type = 'input';
@@ -5048,7 +4772,7 @@ REGLES STRICTES:
                 });
             });
 
-            console.log(`[Kwyk Tutor] Q${index + 1}: Input avec ${question.inputs.length} champ(s)`);
+            LOG.debug(`Q${index + 1}: Input avec ${question.inputs.length} champ(s)`);
         }
 
         return question;
@@ -5081,7 +4805,7 @@ REGLES STRICTES:
                 // Mettre à jour le preview avec le type de la question sélectionnée
                 const q = currentExercise.questions[i];
                 if (q) {
-                    updatePreview(`${currentExercise.questions.length} question(s) détectée(s) [${q.questionType || currentExercise.exerciseType}]`);
+                    updatePreview(`${currentExercise.questions.length} question(s) détectée(s) [${getAnswerFormatLabel(q, currentExercise.exerciseType)}]`);
                 }
 
                 // Reafficher la solution pour la nouvelle question
@@ -5102,6 +4826,22 @@ REGLES STRICTES:
         buttons.forEach((btn, i) => {
             btn.classList.toggle('active', i === currentQuestionIndex);
         });
+    }
+
+    /**
+     * Retourne le label lisible du format de réponse attendu (affiché dans le panel).
+     * Le questionType (graphique, vecteurs…) est réservé à l'IA — l'utilisateur voit le format.
+     */
+    function getAnswerFormatLabel(question, fallbackExerciseType) {
+        const af = question?.answerFormat;
+        const qt = question?.questionType || fallbackExerciseType || '';
+        if (af === 'qcm_simple')    return 'QCM';
+        if (af === 'qcm_multiple')  return 'QCM multiple';
+        // Signes/variations : pas d'input DOM standard → label spécial
+        if (qt === 'tableau_signes')     return 'Tableau de signes';
+        if (qt === 'tableau_variations') return 'Tableau de variations';
+        // tableau_valeurs a answerFormat='input' → tombe dans 'Saisie' ci-dessous
+        return 'Saisie';
     }
 
     function updatePreview(text) {
@@ -5145,7 +4885,7 @@ REGLES STRICTES:
      * @param {string} sharedContext - Contexte commun à toutes les questions (graphiques, etc.)
      */
     async function solveOneQuestion(question, questionIndex, sharedContext = '') {
-        const promptType = detectPromptType(question);
+        const promptType = question.promptType || detectPromptType(question);
         const systemPrompt = getSystemPrompt(promptType, question.answerFormat || 'input');
 
         let prompt = `Exercice de maths (type détecté: ${promptType}):\n\n`;
@@ -5191,14 +4931,14 @@ REGLES STRICTES:
             prompt += `Reponse a saisir\n`;
         }
 
-        console.log(`[Kwyk Tutor] Appel API pour Q${questionIndex + 1} [type: ${promptType}]${sharedContext ? ' + contexte partagé' : ''}`);
-        console.log('[Kwyk Tutor] === SYSTEM PROMPT ===\n' + systemPrompt);
-        console.log('[Kwyk Tutor] === USER PROMPT ===\n' + prompt);
+        LOG.debug(`Appel API pour Q${questionIndex + 1} [type: ${promptType}]${sharedContext ? ' + contexte partagé' : ''}`);
+        LOG.debug('=== SYSTEM PROMPT ===\n' + systemPrompt);
+        LOG.debug('=== USER PROMPT ===\n' + prompt);
 
         // ── DEBUG: capturer l'échange pour kwykDebug() ──
         window._kwykLastExchange = { type: promptType, systemPrompt, userPrompt: prompt, rawResponse: null };
 
-        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        const response = await fetchWithTimeout('https://api.mistral.ai/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -5226,7 +4966,7 @@ REGLES STRICTES:
 
         if (!content) throw new Error('Réponse vide');
 
-        console.log(`[Kwyk Tutor] Réponse brute Q${questionIndex + 1}:`, content);
+        LOG.debug(`Réponse brute Q${questionIndex + 1}:`, content);
         window._kwykLastExchange.rawResponse = content; // ── DEBUG ──
         return parseAIResponse(content);
     }
@@ -5248,6 +4988,7 @@ REGLES STRICTES:
         results.forEach((result, i) => {
             if (result.error) return;
             const s = result.solution;
+            if (!s) return; // Guard : éviter crash si résultat malformé sans .solution
             if (s.regle) merged.solution.regle += (merged.solution.regle ? ' | ' : '') + s.regle;
             if (s.type_exercice && !merged.solution.type_exercice) merged.solution.type_exercice = s.type_exercice;
             if (s.exemple && !merged.solution.exemple) merged.solution.exemple = s.exemple;
@@ -5381,14 +5122,19 @@ REGLES STRICTES:
                 continue;
             }
 
-            // Pattern B : AB→ = (p)/(q) ...  ou  AB→ = n ...  (ratio connu, cible inconnue)
-            const mBfrac = ctx.match(/([A-Z]{2})→\s*=\s*\((-?\d+)\)\/\((\d+)\)\s*\.+/);
+            // Pattern B : AB→ = (p)/(q) ...  ou  AB→ = -(p)/(q) ...  ou  AB→ = n ...  (ratio connu, cible inconnue)
+            // Gère : (-4)/(9) [signe dedans] ET -(4)/(9) [signe dehors]
+            const mBfrac = ctx.match(/([A-Z]{2})→\s*=\s*(-?)\((-?\d+)\)\/\((\d+)\)\s*\.+/);
             const mBint  = !mBfrac && ctx.match(/([A-Z]{2})→\s*=\s*(-?\d+)\s*\.+/);
             const mB = mBfrac || mBint;
             if (mB) {
                 const srcName = mB[1];
-                const p = parseInt(mB[2], 10);
-                const q2 = mBfrac ? parseInt(mBfrac[3], 10) : 1;
+                // mBfrac : group2=signe externe, group3=num (peut être négatif), group4=den
+                // mBint  : group2=entier signé
+                const p = mBfrac
+                    ? (mBfrac[2] === '-' ? -1 : 1) * parseInt(mBfrac[3], 10)
+                    : parseInt(mB[2], 10);
+                const q2 = mBfrac ? parseInt(mBfrac[4], 10) : 1;
                 if (!srcName || q2 === 0 || p === 0) return null;
 
                 const [sa, sb] = [srcName[0], srcName[1]];
@@ -5424,7 +5170,7 @@ REGLES STRICTES:
         }
 
         if (answers.length === 0) return null;
-        console.log('[Kwyk Tutor] Résolution directe colinéarité (sans IA):', answers);
+        LOG.info('Résolution directe colinéarité (sans IA):', answers);
         return formatSolution({
             regle: 'AB→ = k·CD→',
             etapes: steps,
@@ -5497,7 +5243,7 @@ REGLES STRICTES:
         }
 
         if (answers.length === 0) return null;
-        console.log('[Kwyk Tutor] Résolution directe translation (sans IA):', answers);
+        LOG.info('Résolution directe translation (sans IA):', answers);
         return formatSolution({
             regle: 'Translation de vecteur v→ : image = point + v→ (antécédent = image − v→)',
             etapes: steps,
@@ -5570,7 +5316,7 @@ REGLES STRICTES:
         }
 
         if (answers.length === 0) return null;
-        console.log('[Kwyk Tutor] Résolution directe vecteurs égaux (sans IA):', answers);
+        LOG.info('Résolution directe vecteurs égaux (sans IA):', answers);
         return formatSolution({
             regle: 'Deux vecteurs sont égaux s\'ils ont les mêmes coordonnées (même direction, même sens, même longueur).',
             etapes: steps,
@@ -5608,14 +5354,29 @@ REGLES STRICTES:
         for (const q of exercise.questions) {
             const ctx = q.context || '';
 
-            // Détecter une somme : au moins 2 vecteurs séparés par +
-            const sumStr = ctx.match(/[A-Z]{2}→(?:\s*\+\s*[A-Z]{2}→)+/);
+            // Détecter une somme/différence : au moins 2 vecteurs séparés par + ou -
+            const sumStr = ctx.match(/[A-Z]{2}→(?:\s*[+\-]\s*[A-Z]{2}→)+/);
             if (!sumStr) return null;
 
-            const vecs = [...sumStr[0].matchAll(/([A-Z]{2})→/g)].map(m => m[1]);
-            if (vecs.length < 2) return null;
+            // Parser les vecteurs avec leur signe (+ ou -)
+            // Ex: "AD→-CG→" → [{name:"AD", sign:+1}, {name:"CG", sign:-1}]
+            const signedVecs = [];
+            const rawExpr = sumStr[0];
+            const firstVec = rawExpr.match(/^([A-Z]{2})→/);
+            if (!firstVec) return null;
+            signedVecs.push({ name: firstVec[1], sign: +1 });
+            const restTokens = rawExpr.slice(firstVec[0].length);
+            for (const m of restTokens.matchAll(/\s*([+\-])\s*([A-Z]{2})→/g)) {
+                signedVecs.push({ name: m[2], sign: m[1] === '-' ? -1 : +1 });
+            }
+            if (signedVecs.length < 2) return null;
+
+            // Pour approche 1 count-based : un vecteur soustrait AB→ = ajouter BA→ (inverse)
+            const vecs = signedVecs.map(sv => sv.sign === +1 ? sv.name : sv.name[1] + sv.name[0]);
+            const hasSub = signedVecs.some(sv => sv.sign === -1);
 
             // --- Approche 1 : count-based (chaîne télescopique — sans coordonnées) ---
+            // Ne s'applique que s'il n'y a que des additions (les soustractions rendent le count-based peu fiable)
             const counts = {};
             for (const v of vecs) {
                 counts[v[0]] = (counts[v[0]] || 0) - 1;
@@ -5624,7 +5385,7 @@ REGLES STRICTES:
             const positives = Object.entries(counts).filter(([, c]) => c > 0);
             const negatives = Object.entries(counts).filter(([, c]) => c < 0);
 
-            if (positives.length === 1 && negatives.length === 1) {
+            if (!hasSub && positives.length === 1 && negatives.length === 1) {
                 const depart  = negatives[0][0];
                 const arrivee = positives[0][0];
                 const result  = depart + arrivee + '→';
@@ -5639,33 +5400,53 @@ REGLES STRICTES:
                 continue;
             }
 
-            // --- Approche 2 : coordonnées (somme non-télescopique) ---
-            if (pointNames.length === 0) return null; // pas de figure → impossible
+            // --- Approche 2 : Chasles ancré — partir du départ de chaque vecteur de la somme ---
+            // Ex: LC→+JB→ : essayer L→R puis J→R avec R = départ + somme totale
+            // Pour la soustraction AB→-CD→ : on utilise les signes (dx += sign*vdx)
+            if (pointNames.length === 0) return null;
 
             let dx = 0, dy = 0;
             const stepParts = [];
             let coordsOk = true;
-            for (const v of vecs) {
+            for (const sv of signedVecs) {
+                const v = sv.name;
                 const A = coords[v[0]], B = coords[v[1]];
                 if (!A || !B) { coordsOk = false; break; }
                 const vdx = B.x - A.x, vdy = B.y - A.y;
-                dx += vdx; dy += vdy;
-                stepParts.push(`${v}→=(${vdx};${vdy})`);
+                dx += sv.sign * vdx; dy += sv.sign * vdy;
+                const signStr = sv.sign === -1 ? '-' : '+';
+                stepParts.push(`${signStr}${v}→=(${sv.sign === -1 ? -vdx : vdx};${sv.sign === -1 ? -vdy : vdy})`);
             }
             if (!coordsOk) return null;
 
-            // Chercher la paire (P,Q) telle que Q−P = (dx,dy), dans l'ordre de la figure
+            // Tenter chaque point de départ des vecteurs de la somme (dans l'ordre)
             let found = null;
-            outer: for (const pn of pointNames) {
-                for (const qn of pointNames) {
-                    if (pn === qn) continue;
-                    const P = coords[pn], Q = coords[qn];
-                    if (Math.abs((Q.x - P.x) - dx) < 0.001 && Math.abs((Q.y - P.y) - dy) < 0.001) {
-                        found = pn + qn + '→';
-                        break outer;
+            for (const sv of signedVecs) {
+                const startName = sv.name[0];
+                const S = coords[startName];
+                if (!S) continue;
+                const Rx = S.x + dx, Ry = S.y + dy;
+                const rName = pointNames.find(p => Math.abs(coords[p].x - Rx) < 0.001 && Math.abs(coords[p].y - Ry) < 0.001);
+                if (rName && rName !== startName) {
+                    found = startName + rName + '→';
+                    break;
+                }
+            }
+
+            // --- Approche 3 : fallback — première paire (P,Q) quelconque dans l'ordre de la figure ---
+            if (!found) {
+                outer3: for (const pn of pointNames) {
+                    for (const qn of pointNames) {
+                        if (pn === qn) continue;
+                        const P = coords[pn], Q = coords[qn];
+                        if (Math.abs((Q.x - P.x) - dx) < 0.001 && Math.abs((Q.y - P.y) - dy) < 0.001) {
+                            found = pn + qn + '→';
+                            break outer3;
+                        }
                     }
                 }
             }
+
             if (!found) return null;
 
             steps.push(...stepParts, `Somme=(${dx};${dy}) → ${found}`);
@@ -5673,7 +5454,7 @@ REGLES STRICTES:
         }
 
         if (answers.length === 0) return null;
-        console.log('[Kwyk Tutor] Résolution directe somme vecteurs (sans IA):', answers);
+        LOG.info('Résolution directe somme vecteurs (sans IA):', answers);
         return formatSolution({
             regle: 'Calculer les composantes de chaque vecteur, additionner, identifier la paire correspondante.',
             etapes: steps,
@@ -5762,7 +5543,7 @@ REGLES STRICTES:
             `${wName}\u2192 = ${reponse}`
         ];
 
-        console.log(`[Kwyk Tutor] Résolution directe combinaison linéaire (sans IA): ${reponse}`);
+        LOG.debug(`Résolution directe combinaison linéaire (sans IA): ${reponse}`);
         return formatSolution({
             regle: `Résoudre : ${wName}x = a·${uName}x + b·${vName}x  et  ${wName}y = a·${uName}y + b·${vName}y (règle de Cramer)`,
             etapes: steps,
@@ -5790,7 +5571,7 @@ REGLES STRICTES:
 
         // Déduplication
         if (solveProblemPending && solveProblemHash === lastExerciseHash) {
-            console.log('[Kwyk Tutor] Requête déjà en cours, réutilisation');
+            LOG.debug('Requête déjà en cours, réutilisation');
             return solveProblemPending;
         }
 
@@ -5803,13 +5584,12 @@ REGLES STRICTES:
                 const directSolution = tryDirectSolve();
                 if (directSolution) return directSolution;
 
-                // Si les questions ont des types différents → un appel par question
-                const promptTypes = new Set(currentExercise.questions.map(q => detectPromptType(q)));
-                if (promptTypes.size > 1) {
-                    console.log('[Kwyk Tutor] Exercice mixte: appels séparés par question');
+                // Multi-questions → toujours un appel par question (évite les arrays IA)
+                if (currentExercise.questions.length > 1) {
+                    LOG.debug('Multi-questions: appels séparés par question');
                     const sharedContext = extractSharedContext(currentExercise.questions);
                     if (sharedContext) {
-                        console.log('[Kwyk Tutor] Contexte partagé extrait:', sharedContext);
+                        LOG.debug('Contexte partagé extrait:', sharedContext);
                     }
                     const results = await Promise.all(
                         currentExercise.questions.map((q, i) => solveOneQuestion(q, i, sharedContext).catch(err => ({ error: err.message })))
@@ -5827,15 +5607,15 @@ REGLES STRICTES:
                     return merged;
                 }
 
-                // Sinon → un seul appel classique
+                // 1 question → appel classique unique
                 const prompt = buildPrompt();
                 const promptType = currentExercise.questions.length > 0
-                    ? detectPromptType(currentExercise.questions[0])
+                    ? (currentExercise.questions[0].promptType || detectPromptType(currentExercise.questions[0]))
                     : exerciseType;
                 const systemPrompt = getSystemPrompt(promptType, currentExercise.questions[0]?.answerFormat || 'input');
-                console.log('[Kwyk Tutor] === SYSTEM PROMPT ===\n' + systemPrompt);
-                console.log('[Kwyk Tutor] === USER PROMPT ===\n' + prompt);
-                const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+                LOG.debug('=== SYSTEM PROMPT ===\n' + systemPrompt);
+                LOG.debug('=== USER PROMPT ===\n' + prompt);
+                const response = await fetchWithTimeout('https://api.mistral.ai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -5861,7 +5641,7 @@ REGLES STRICTES:
 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
-                    console.error('[Kwyk Tutor] Erreur API:', errorData);
+                    LOG.error('Erreur API:', errorData);
                     return { error: `Erreur API (${response.status}): ${errorData.error?.message || 'Inconnue'}` };
                 }
 
@@ -5872,15 +5652,15 @@ REGLES STRICTES:
                     return { error: 'Reponse vide de l\'API' };
                 }
 
-                console.log('[Kwyk Tutor] Reponse brute:', content);
+                LOG.debug('Reponse brute:', content);
                 return parseAIResponse(content);
 
             } catch (error) {
                 if (error.name === 'AbortError') {
-                    console.log('[Kwyk Tutor] ⛔ Appel IA annulé (nouvel exercice détecté)');
+                    LOG.debug('⛔ Appel IA annulé (nouvel exercice détecté)');
                     return { error: 'aborted' };
                 }
-                console.error('[Kwyk Tutor] Erreur:', error);
+                LOG.error('Erreur:', error);
                 return { error: `Erreur: ${error.message}` };
             } finally {
                 solveProblemPending = null;
@@ -5891,7 +5671,7 @@ REGLES STRICTES:
     }
 
     // ===========================================
-    // V15: PROMPTS MODULAIRES
+    // PROMPTS MODULAIRES
     // ===========================================
 
     /**
@@ -5901,10 +5681,14 @@ REGLES STRICTES:
     function getBasePrompt() {
         return `Réponds UNIQUEMENT en JSON valide. Aucun texte en dehors du JSON.
 N'utilise JAMAIS de caractères d'échappement (\\n, \\t, \\x) dans les valeurs JSON.
+INTERDIT dans les valeurs JSON: \\(...\\), \\[...\\], $...$ — aucun délimiteur LaTeX.
+INTERDIT dans les valeurs JSON: \\frac{}{}, \\sqrt{}, \\overrightarrow{}, \\mathbb{}, \\text{} — utilise les notations ci-dessous à la place.
 
 NOTATION (tous les champs):
-- Fractions: TOUJOURS (numérateur)/(dénominateur) — ex: (1)/(3), (-8)/(7), (x+1)/(x-2). JAMAIS 1/3 ou -8/7.
-- Puissances: x^2 — Racines: √ simplifiées (ex: 2√7, jamais √28) — Pas de *
+- Fractions: TOUJOURS (numérateur)/(dénominateur) — ex: (1)/(3), (-8)/(7), (x+1)/(x-2). JAMAIS 1/3, -8/7, ou \\frac{1}{3}.
+- Puissances: x^2 — Racines: √ simplifiées (ex: 2√7, jamais √28 ou \\sqrt{28}) — Pas de *
+- Vecteurs: AB→ (flèche après) — JAMAIS \\overrightarrow{AB}
+- Ensembles: ℝ, ℝ\\{0;1} — JAMAIS \\mathbb{R}
 - Intervalles: ]a;b[, [a;b], ]a;+∞[ — strict (< >) → crochets ouverts aux racines ; large (≤ ≥) → crochets fermés
 - Unions: simplifier {val}∪]val;b[ = [val;b[  |  ]a;val[∪{val} = ]a;val]
 
@@ -5996,9 +5780,7 @@ EXEMPLE 2 — Énoncé: "Résoudre x²-6x+9=0"
 Réponse:
 {"regle": "(a-b)²=a²-2ab+b² identité remarquable", "exemple": {"enonce": "Résoudre x²+10x+25=0", "etapes": ["(x+5)²=0", "x=-5"]}, "etapes": ["x²-6x+9=(x-3)²", "(x-3)²=0 → x=3", "3"], "reponses": [{"question": 1, "type": "input", "reponse": "3"}]}
 
-EXEMPLE 3 — Énoncé: "Résoudre -7<=3-2x<=13. Réponse sous forme d'intervalle."
-Réponse:
-{"regle": "Double inéquation: soustraire puis diviser dans les 3 membres (inverser si ÷ négatif)", "exemple": {"enonce": "Résoudre 1<4x+5<=21", "etapes": ["-4<4x<=16", "-1<x<=4", "]-1;4]"]}, "etapes": ["-7-3<=-2x<=13-3", "-10<=-2x<=10", "÷(-2) inverse: -5<=x<=5", "[-5;5]"], "reponses": [{"question": 1, "type": "input", "reponse": "[-5;5]"}]}`,
+`,
 
             inequation: `
 TYPE D'EXERCICE: Inéquation (produit ou quotient, résoudre sur un ensemble).
@@ -6120,33 +5902,43 @@ Réponse:
 {"regle": "f(x) = (1)/(x) : quand x augmente (positif), (1)/(x) diminue. Asymptote verticale en x = 0 : la fonction n'est pas définie en 0.", "exemple": {"enonce": "Tableau de variations de f(x) = (2)/(x)", "etapes": ["x = 0 interdit  (division par zéro)", "---", "Sur ]-∞;0[ : quand x augmente vers 0⁻, (2)/(x) diminue vers -∞ → ↘", "Sur ]0;+∞[ : quand x augmente depuis 0⁺, (2)/(x) diminue → ↘"]}, "etapes": ["x = 0 interdit  (division par zéro)", "---", "Sur ]-∞;0[ : quand x augmente vers 0⁻, (1)/(x) diminue vers -∞ → ↘", "Sur ]0;+∞[ : quand x augmente depuis 0⁺, (1)/(x) diminue → ↘"], "reponses": [{"question": 1, "type": "input", "reponse": "↘"}, {"question": 2, "type": "input", "reponse": "↘"}], "tableau": {"type": "variation", "headers": ["x", "-∞", "0", "+∞"], "rows": [{"label": "f(x)", "values": ["↘", "||", "↘"]}]}}`,
 
             tableau_valeurs: `
-TYPE D'EXERCICE: Tableau de valeurs avec valeur(s) manquante(s) à calculer.
+TYPE D'EXERCICE: Tableau de valeurs — DEUX CAS POSSIBLES.
 
 Le tableau est présenté entre [Tableau] et [/Tableau] avec des colonnes séparées par |.
-Calcule la/les valeur(s) manquante(s) (marquées par ?).
+
+CAS 1 — VALEURS MANQUANTES: Le tableau contient "?" → calculer la/les valeur(s) manquante(s).
+
+CAS 2 — DÉRIVER UNE VALEUR DU TABLEAU: Le tableau est complet (pas de "?") → calculer ce que demande la question (coefficient directeur, ordonnée à l'origine, expression de f...).
+- Coefficient directeur a : a = (f(x2) - f(x1)) / (x2 - x1)
+- Ordonnée à l'origine b : b = f(x1) - a * x1
+- Expression de f : retourner l'expression SEULE sans "f(x) =" (ex: "-x+2")
 
 Réponds avec ce JSON exact:
 {
-  "regle": "Règle pour calculer les valeurs manquantes",
+  "regle": "Règle mathématique applicable",
   "exemple": {
     "enonce": "Un exemple similaire mais DIFFÉRENT de l'exercice posé",
     "etapes": ["calcul 1", "calcul 2", "résultat"]
   },
   "etapes": ["calcul 1", "calcul 2", "résultat"],
   "reponses": [
-    {"question": 1, "type": "input", "reponse": "VALEUR NUMÉRIQUE"}
+    {"question": 1, "type": "input", "reponse": "VALEUR"}
   ]
 }
 
-EXEMPLE — Énoncé: "f est linéaire. [Tableau] x | -8 | -6 / f(x) | -2 | ? [/Tableau]"
+EXEMPLE CAS 1 — Énoncé: "f est linéaire. [Tableau] x | -8 | -6 / f(x) | -2 | ? [/Tableau]"
 Réponse:
-{"regle": "Une fonction linéaire est de la forme f(x) = ax. On trouve a à partir d'un couple connu, puis on calcule les valeurs manquantes.", "exemple": {"enonce": "f est linéaire. [Tableau] x | -10 | -5 / f(x) | -2 | ? [/Tableau]", "etapes": ["f(x) = ax", "f(-10) = -2 → -10a = -2 → a = (1)/(5)", "f(-5) = (1)/(5) × (-5) = -1"]}, "etapes": ["f(x) = ax", "f(-8) = -2 → -8a = -2 → a = (1)/(4)", "f(-6) = (1)/(4) × (-6) = (-6)/(4) = (-3)/(2)"], "reponses": [{"question": 1, "type": "input", "reponse": "(-3)/(2)"}]}`,
+{"regle": "Fonction linéaire f(x) = ax. Trouver a depuis un couple connu, calculer les valeurs manquantes.", "exemple": {"enonce": "f linéaire. [Tableau] x | -10 | -5 / f(x) | -2 | ? [/Tableau]", "etapes": ["f(x) = ax", "f(-10) = -2 → a = (1)/(5)", "f(-5) = (1)/(5) × (-5) = -1"]}, "etapes": ["f(x) = ax", "f(-8) = -2 → a = (1)/(4)", "f(-6) = (1)/(4) × (-6) = (-3)/(2)"], "reponses": [{"question": 1, "type": "input", "reponse": "(-3)/(2)"}]}
+
+EXEMPLE CAS 2 — Énoncé: "Fonction affine f. [Tableau] x | 2 | 6 / f(x) | 4 | -4 [/Tableau] Déterminer le coefficient directeur."
+Réponse:
+{"regle": "Coefficient directeur a = (f(x2) - f(x1)) / (x2 - x1).", "exemple": {"enonce": "Fonction affine f. [Tableau] x | 1 | 5 / f(x) | 3 | -5 [/Tableau] Coefficient directeur ?", "etapes": ["a = (-5 - 3) / (5 - 1)", "a = -8 / 4", "a = -2"]}, "etapes": ["a = (-4 - 4) / (6 - 2)", "a = -8 / 4", "a = -2"], "reponses": [{"question": 1, "type": "input", "reponse": "-2"}]}`,
 
             graphique: `
 TYPE D'EXERCICE: Exercice à partir de graphiques de fonctions.
 Les graphiques sont décrits sous la forme [Graphique f : y = expression].
 
-DEUX CAS POSSIBLES — détecte lequel s'applique:
+TROIS CAS POSSIBLES — détecte lequel s'applique:
 
 CAS 1 — IDENTIFICATION: "Quel type de fonction représente ce graphique ?"
 - Analyse l'expression pour identifier le type (affine, linéaire, constante, polynôme...)
@@ -6154,12 +5946,17 @@ CAS 1 — IDENTIFICATION: "Quel type de fonction représente ce graphique ?"
 - Si on demande "constante ET/OU affine ?", une constante est AUSSI affine → coche les DEUX
 
 CAS 2 — RÉSOLUTION D'ÉQUATION/INÉGALITÉ: "Résoudre f(x) = g(x)" ou "f(x) ≤ g(x)"
-RÈGLES CRITIQUES — à respecter absolument:
 - Recopie les coefficients EXACTEMENT tels qu'ils apparaissent. Ne jamais arrondir.
 - Pour f(x) ≤ g(x) : calculer h(x) = f(x) - g(x), puis résoudre h(x) ≤ 0
-- Les exercices Kwyk ont TOUJOURS des racines entières ou simples → si tu trouves des décimales, tu as fait une erreur
-- Après avoir trouvé les racines, vérifie en substituant dans l'expression originale
 - Signe de h(x) = ax² + bx + c : si a > 0, négatif entre les racines → [x1 ; x2]
+
+CAS 3 — EXPRESSION ALGÉBRIQUE ou COEFFICIENT: "Trouver l'expression de f", "Donner la formule", "Déterminer le coefficient directeur"
+- Lire l'expression dans [Graphique f : y = expression] ou calculer depuis un point A(x;y) : a = y/x
+- Si la question demande le COEFFICIENT DIRECTEUR (ou "valeur de a") → retourner UNIQUEMENT le nombre (ex: "2", "(7)/(8)", "-3")
+- Si la question demande l'EXPRESSION de f → retourner l'expression SEULE sans "f(x) =" (ex: "(7)/(8)x", "-2x+3")
+- Notation: * → rien, fractions → (num)/(den)
+- Ex coefficient: y = 2*x, question "coefficient directeur" → "2"
+- Ex expression:  y = (7/8)*x, question "expression de f"  → "(7)/(8)x"
 
 Réponds avec ce JSON exact:
 {
@@ -6171,6 +5968,14 @@ Réponds avec ce JSON exact:
   "etapes": ["calcul 1", "calcul 2", "---", "résultat"],
   "reponses": [{"question": 1, "type": "input", "reponse": "valeur"}]
 }
+
+EXEMPLE CAS 3a — Énoncé: "Déterminer le coefficient directeur. [Graphique A : y = 2*x]"
+Réponse:
+{"regle": "Coefficient directeur a = valeur devant x dans f(x) = ax + b.", "exemple": {"enonce": "Coefficient directeur de [Graphique f : y = (3)/(4)*x]", "etapes": ["y = (3)/(4)*x → a = (3)/(4)"]}, "etapes": ["y = 2*x → a = 2"], "reponses": [{"question": 1, "type": "input", "reponse": "2"}]}
+
+EXEMPLE CAS 3b — Énoncé: "f est linéaire. Le point A(6;9) est sur la courbe de f. Trouver l'expression de f."
+Réponse:
+{"regle": "Fonction linéaire f(x) = ax. Trouver a : a = y/x pour tout point (x;y) sur la courbe.", "exemple": {"enonce": "f linéaire, A(4;6). Expression de f ?", "etapes": ["a = 6/4 = (3)/(2)", "f(x) = (3)/(2)x"]}, "etapes": ["f(x) = ax", "a = 9/6 = (3)/(2)", "f(x) = (3)/(2)x"], "reponses": [{"question": 1, "type": "input", "reponse": "(3)/(2)x"}]}
 
 EXEMPLE CAS 2 — Énoncé: "Résoudre f(x) ≤ g(x) avec [Graphique f : y = x*x - 2*x] et [Graphique g : y = 2*x + 5]"
 Réponse:
@@ -6185,7 +5990,7 @@ TYPE D'EXERCICE: Vecteurs sur figure géométrique.
 
 Les coordonnées des points sont listées en début de question: [Figure géométrique : A(x;y), B(x;y), ...]
 
-FORMULE: \\overrightarrow{PQ} = Q - P = (Qx - Px ; Qy - Py). ATTENTION: ARRIVÉE moins DÉPART.
+FORMULE: PQ→ = Q - P = (Qx - Px ; Qy - Py). ATTENTION: ARRIVÉE moins DÉPART.
 
 Réponds avec ce JSON exact:
 {
@@ -6197,7 +6002,7 @@ Réponds avec ce JSON exact:
 
 RÈGLES CRITIQUES:
 1. Pour chaque vecteur à calculer, IDENTIFIER d'abord les coordonnées des deux points dans la liste: "P=(Px;Py), Q=(Qx;Qy)".
-2. \\overrightarrow{PQ} = Q - P = (Qx - Px ; Qy - Py) : ARRIVÉE moins DÉPART.
+2. PQ→ = Q - P = (Qx - Px ; Qy - Py) : ARRIVÉE moins DÉPART. (Notation: PQ→ avec flèche après, JAMAIS \\overrightarrow{PQ} dans le JSON.)
 3. Pour "vecteurs égaux": calculer le vecteur de référence, puis tester TOUS les couples ordonnés (X,Y) dans LES DEUX SENS — XY→ ET YX→ pour chaque paire. Un vecteur égal peut partir d'un point dont la lettre vient APRÈS la destination (ex: HA→ si H>A alphabétiquement).
 4. Dans "etapes": N'écrire AUCUNE ligne pour les vecteurs non-égaux (même pas ✗). Écrire uniquement: 1) le vecteur de référence avec identification des coordonnées, 2) chaque vecteur égal trouvé (avec ✓), 3) la réponse finale.
 5. "reponse": vecteurs avec "→" séparés par ";". Si aucun: "aucun". Translation → nom du point image.
@@ -6221,13 +6026,18 @@ Réponse:
      */
     function getSystemPrompt(exerciseType, answerFormat = 'input') {
         if (!exerciseType || exerciseType === 'unknown') {
-            exerciseType = 'input';
+            // Fix P0 — Si answerFormat indique un type spécialisé, utiliser CE prompt-là
+            // Sinon le fallback 'input' + appendice QCM créait des formats contradictoires
+            if (answerFormat === 'qcm_multiple') exerciseType = 'qcm_multiple';
+            else if (answerFormat === 'qcm_simple') exerciseType = 'qcm_simple';
+            else exerciseType = 'input';
         }
-        console.log(`[Kwyk Tutor] Prompt modulaire pour type: ${exerciseType} | format: ${answerFormat}`);
+        LOG.debug(`Prompt modulaire pour type: ${exerciseType} | format: ${answerFormat}`);
         let prompt = getBasePrompt() + '\n\n' + getTypePrompt(exerciseType);
-        if (answerFormat === 'qcm_simple') {
+        // Appendice QCM uniquement si le type prompt n'est pas déjà QCM (évite double instructions)
+        if (answerFormat === 'qcm_simple' && exerciseType !== 'qcm_simple') {
             prompt += '\n\nFORMAT RÉPONSE QCM (1 choix): après avoir calculé la réponse, identifie la lettre de l\'option correspondante parmi les options listées. Retourne `"type": "qcm_simple"` et `"reponse": "B"` (lettre seule, ex: A, B, C ou D).';
-        } else if (answerFormat === 'qcm_multiple') {
+        } else if (answerFormat === 'qcm_multiple' && exerciseType !== 'qcm_multiple') {
             prompt += '\n\nFORMAT RÉPONSE QCM multiple: après avoir calculé les réponses, identifie les lettres des options correctes. Utilise `"type": "qcm_multiples"` et `"reponses": ["A", "C"]` (array de lettres).';
         }
         return prompt;
@@ -6244,7 +6054,7 @@ Réponse:
         }
 
         currentExercise.questions.forEach((q, i) => {
-            const promptType = detectPromptType(q);
+            const promptType = q.promptType || detectPromptType(q);
             prompt += `Question ${i + 1} [type: ${promptType}]:\n`;
             prompt += `${q.context}\n`;
 
@@ -6288,6 +6098,13 @@ Réponse:
         // 2. SOLUTION SIMPLE : Remplacer TOUS les retours à la ligne par des espaces
         jsonStr = jsonStr.replace(/\n/g, ' ').replace(/\r/g, ' ').replace(/\t/g, ' ');
 
+        // 2b. Fix --- séparateurs non quotés (l'IA oublie parfois les guillemets)
+        // Pattern post-flatten : [   ---   "valeur  →  [   "---",   "valeur
+        //                         ,   ---   "valeur  →  ,   "---",   "valeur
+        //                         ,   ---   ,         →  ,   "---",  (trailing comma fixé étape 4)
+        jsonStr = jsonStr.replace(/([\[,]\s*)---(\s*")/g, '$1"---",$2');
+        jsonStr = jsonStr.replace(/([\[,]\s*)---(\s*[,\]])/g, '$1"---"$2');
+
         // 3. Supprimer les backslashes invalides (comme avant)
         let result = '';
         let i = 0;
@@ -6315,6 +6132,10 @@ Réponse:
             }
         }
 
+        // 4. Supprimer trailing commas avant } ou ] (ex: {"a":1,} → {"a":1})
+        // Doit être après le pass char-by-char car peut créer des commas en trop
+        result = result.replace(/,(\s*[}\]])/g, '$1');
+
         return result;
     }
 
@@ -6323,7 +6144,23 @@ Réponse:
      */
     function parseAIResponse(content) {
         const originalContent = content;
-        
+
+        // Array response = multi-question (ex: tableau_signes Q1/Q2/Q3) → _perQuestion
+        function wrapParsed(parsed) {
+            // Fix W2 — IA a retourné string nu (ex: "null", "voir explication") au lieu d'objet JSON
+            if (parsed === null || typeof parsed === 'string' || typeof parsed === 'number') {
+                LOG.warn('IA réponse non-objet:', parsed);
+                return formatSolution({ regle: '', etapes: parsed ? [String(parsed)] : [], reponses: [] });
+            }
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                const perQuestion = parsed.map(p => formatSolution(p).solution);
+                const mainResult = formatSolution(parsed[0]);
+                mainResult.solution._perQuestion = perQuestion;
+                return mainResult;
+            }
+            return formatSolution(parsed);
+        }
+
         try {
             // Essayer directement d'abord
             const cleaned1 = content.trim();
@@ -6334,32 +6171,47 @@ Réponse:
                 if (closeIdx !== -1) test1 = test1.substring(0, closeIdx);
                 test1 = test1.trim();
             }
-            
+
+            // Si l'IA a ajouté du texte avant le JSON (ex: "Voici ma réponse:\n{...}")
+            // → trouver la position du premier { ou [ et extraire depuis là
+            if (!test1.startsWith('{') && !test1.startsWith('[')) {
+                const braceIdx  = test1.indexOf('{');
+                const bracketIdx = test1.indexOf('[');
+                const startIdx = (braceIdx === -1) ? bracketIdx
+                               : (bracketIdx === -1) ? braceIdx
+                               : Math.min(braceIdx, bracketIdx);
+                if (startIdx !== -1) test1 = test1.substring(startIdx);
+            }
+
             const parsed = JSON.parse(test1);
-            return formatSolution(parsed);
+            return wrapParsed(parsed);
         } catch (e1) {
-            console.log('[Kwyk Tutor] Parsing direct echoue, nettoyage ultra-robuste...');
-            
+            LOG.debug('Parsing direct echoue, nettoyage ultra-robuste...');
+
             try {
                 // Nettoyer et reessayer
                 const cleaned = cleanJSON(content);
-                console.log('[Kwyk Tutor] JSON nettoye (premiers 1000 chars):', cleaned.substring(0, 1000));
-                
+                LOG.debug('JSON nettoye (premiers 1000 chars):', cleaned.substring(0, 1000));
+
                 const parsed = JSON.parse(cleaned);
-                return formatSolution(parsed);
+                return wrapParsed(parsed);
             } catch (e2) {
-                console.error('[Kwyk Tutor] Erreur parsing JSON apres nettoyage:', e2);
-                
+                LOG.error('Erreur parsing JSON apres nettoyage:', e2);
+
                 // Dernier essai : supprimer TOUS les retours a la ligne
                 try {
                     const ultraCleaned = cleanJSON(content).replace(/[\r\n]+/g, ' ');
-                    console.log('[Kwyk Tutor] Tentative ultra-nettoyage (sans retours ligne)...');
+                    LOG.debug('Tentative ultra-nettoyage (sans retours ligne)...');
                     const parsed = JSON.parse(ultraCleaned);
-                    return formatSolution(parsed);
+                    return wrapParsed(parsed);
                 } catch (e3) {
-                    console.error('[Kwyk Tutor] Echec total du parsing JSON');
-                    console.log('[Kwyk Tutor] JSON pour debug:', cleanJSON(content).substring(0, 2000));
-                    
+                    LOG.error('Echec total du parsing JSON. Erreur:', e3?.message);
+                    // Capturer extrait début + fin de la réponse brute (toujours visible, pas debug-only)
+                    const head = (originalContent || '').substring(0, 500);
+                    const tail = (originalContent || '').substring(Math.max(0, (originalContent || '').length - 300));
+                    LOG.error(`Réponse IA brute (début 500 chars):\n${head}`);
+                    LOG.error(`Réponse IA brute (fin 300 chars):\n${tail}`);
+                    Telemetry.incr('parseFailures');
                     // Fallback: extraire manuellement
                     return parseFallback(originalContent);
                 }
@@ -6371,7 +6223,7 @@ Réponse:
      * Formate la solution parsee
      */
 
-    // V12: Valide et nettoie une réponse pour s'assurer qu'elle ne contient pas d'explication
+    // Valide et nettoie une réponse pour s'assurer qu'elle ne contient pas d'explication
     function validateReponse(reponse) {
         if (!reponse || typeof reponse !== 'string') return '';
 
@@ -6391,14 +6243,14 @@ Réponse:
         // Si la réponse ressemble à une explication, retourner vide
         for (const pattern of explanationPatterns) {
             if (pattern.test(reponse.trim())) {
-                console.log('[Kwyk Tutor] Réponse invalide détectée (explication):', reponse.substring(0, 50));
+                LOG.debug('Réponse invalide détectée (explication):', reponse.substring(0, 50));
                 return '';
             }
         }
 
         // Si la réponse est trop longue (> 100 chars), c'est probablement une explication
         if (reponse.length > 100) {
-            console.log('[Kwyk Tutor] Réponse trop longue, probablement une explication:', reponse.substring(0, 50));
+            LOG.debug('Réponse trop longue, probablement une explication:', reponse.substring(0, 50));
             return '';
         }
 
@@ -6414,7 +6266,7 @@ Réponse:
             reponses: []
         };
 
-        // V14: Préserver le champ tableau pour l'affichage structuré
+        // Préserver le champ tableau pour l'affichage structuré
         if (parsed.tableau && parsed.tableau.headers && Array.isArray(parsed.tableau.rows)) {
             solution.tableau = parsed.tableau;
         }
@@ -6424,7 +6276,7 @@ Réponse:
             parsed.reponses.forEach(r => {
                 // Si "reponses" (pluriel) au lieu de "reponse" (singulier) → QCM multiple ou tableau objets
                 if (r.reponses && Array.isArray(r.reponses)) {
-                    // V14: Si c'est un tableau d'objets {case, valeur}, extraire les valeurs en réponses individuelles
+                    // Si c'est un tableau d'objets {case, valeur}, extraire les valeurs en réponses individuelles
                     if (r.reponses.length > 0 && typeof r.reponses[0] === 'object' && r.reponses[0].valeur !== undefined) {
                         r.reponses.forEach((item, idx) => {
                             solution.reponses.push({
@@ -6451,12 +6303,12 @@ Réponse:
                         });
                     }
                 } else if (r.reponse) {
-                    // V15: Normaliser reponse en string si l'IA renvoie un array/objet
+                    // Normaliser reponse en string si l'IA renvoie un array/objet
                     let rawReponse = r.reponse;
                     if (Array.isArray(rawReponse)) {
                         // Array d'objets → extraire les valeurs utiles en réponses individuelles
                         rawReponse.forEach((item, idx) => {
-                            const val = typeof item === 'string' ? item : (item.symbole || item.valeur || item.reponse || JSON.stringify(item));
+                            const val = typeof item === 'string' ? item : (item.symbole || item.valeur || item.reponse || item.description || JSON.stringify(item));
                             solution.reponses.push({
                                 question: r.question ? `${r.question}.${idx + 1}` : idx + 1,
                                 type: r.type || 'input',
@@ -6465,7 +6317,7 @@ Réponse:
                             });
                         });
                     } else if (typeof rawReponse === 'object') {
-                        const val = rawReponse.symbole || rawReponse.valeur || rawReponse.reponse || JSON.stringify(rawReponse);
+                        const val = rawReponse.symbole || rawReponse.valeur || rawReponse.reponse || rawReponse.description || JSON.stringify(rawReponse);
                         solution.reponses.push({
                             question: r.question,
                             type: r.type || 'input',
@@ -6482,11 +6334,23 @@ Réponse:
                             explication: r.explication || ''
                         });
                     }
+                } else if (r.r !== undefined) {
+                    // Fix W1 — Champ alternatif "r" au lieu de "reponse" (l'IA écrit parfois différemment)
+                    solution.reponses.push({
+                        question: r.question,
+                        type: r.type || 'input',
+                        reponse: validateReponse(String(r.r)),
+                        explication: r.explication || ''
+                    });
                 }
             });
+            // Fix W6 — warn si extraction silencieusement vide alors que parsed contenait des items
+            if (solution.reponses.length === 0 && parsed.reponses.length > 0) {
+                LOG.warn(`formatSolution: 0/${parsed.reponses.length} réponses extraites — format IA non reconnu`);
+            }
         }
 
-        // V17g: Si données d'inéquation structurées, construire l'intervalle automatiquement
+        // Si données d'inéquation structurées, construire l'intervalle automatiquement
         if (parsed.inequation && parsed.inequation.critiques && parsed.inequation.signes && parsed.inequation.comparaison) {
             const ineq = parsed.inequation;
 
@@ -6499,7 +6363,7 @@ Réponse:
             if (ctxCompMatch) {
                 const ctxComp = ctxCompMatch[1].replace('≥', '>=').replace('≤', '<=');
                 if (ctxComp !== comp) {
-                    console.log('[Kwyk Tutor] ⚠️ Comparaison IA corrigée:', comp, '→', ctxComp, '(depuis le contexte)');
+                    LOG.debug('⚠️ Comparaison IA corrigée:', comp, '→', ctxComp, '(depuis le contexte)');
                     comp = ctxComp;
                 }
             }
@@ -6509,8 +6373,8 @@ Réponse:
                 ineq.signes,
                 comp
             );
-            console.log('[Kwyk Tutor] 🔧 Intervalle construit par le code:', intervalResult);
-            console.log('[Kwyk Tutor]    Données IA:', JSON.stringify(ineq));
+            LOG.debug('🔧 Intervalle construit par le code:', intervalResult);
+            LOG.debug('   Données IA:', JSON.stringify(ineq));
 
             // Si construction réussie → utiliser l'intervalle construit (plus fiable pour les crochets)
             // Sinon → garder la réponse texte de l'IA (toujours présente grâce au prompt)
@@ -6528,17 +6392,17 @@ Réponse:
             } else {
                 let fallbackReponse = solution.reponses?.[0]?.reponse || '';
                 if (!fallbackReponse || fallbackReponse === 'auto' || fallbackReponse === 'IGNORÉ (calculé auto)') {
-                    console.error('[Kwyk Tutor] ❌ Construction échouée et pas de réponse IA exploitable');
+                    LOG.error('❌ Construction échouée et pas de réponse IA exploitable');
                 } else {
                     // Corriger les bornes inversées dans la réponse IA (ex: ]-(9)/(7);-(3)/(2)[ → ]-(3)/(2);-(9)/(7)[)
                     fallbackReponse = fixIntervalBounds(fallbackReponse);
                     solution.reponses[0].reponse = fallbackReponse;
-                    console.warn('[Kwyk Tutor] ⚠️ Construction intervalle échouée, réponse IA corrigée:', fallbackReponse);
+                    LOG.warn('⚠️ Construction intervalle échouée, réponse IA corrigée:', fallbackReponse);
                 }
             }
         }
 
-        console.log('[Kwyk Tutor] Solution parsee:', solution);
+        LOG.debug('Solution parsee:', solution);
         return { solution };
     }
 
@@ -6546,7 +6410,13 @@ Réponse:
      * Fallback si le JSON n'est pas valide
      */
     function parseFallback(content) {
-        console.log('[Kwyk Tutor] Utilisation du fallback parsing');
+        LOG.debug('Utilisation du fallback parsing');
+
+        // Fix W7 — guard si appelé hors flow normal (prefetch sans currentExercise set, edge case async)
+        if (!currentExercise || !Array.isArray(currentExercise.questions)) {
+            LOG.error('parseFallback sans currentExercise — return solution vide');
+            return { solution: { regle: '', exemple: null, etapes: [], reponses: [] } };
+        }
 
         const solution = {
             regle: '',
@@ -6631,7 +6501,7 @@ Réponse:
             });
         });
 
-        console.log('[Kwyk Tutor] Fallback - reponses extraites:', solution.reponses);
+        LOG.debug('Fallback - reponses extraites:', solution.reponses);
         return { solution };
     }
 
@@ -6640,7 +6510,7 @@ Réponse:
     // ===========================================
 
     async function handleAction(action) {
-        console.log('[Kwyk Tutor] Action:', action);
+        LOG.debug('Action:', action);
 
         if (isLoading) return;
 
@@ -6656,7 +6526,7 @@ Réponse:
             // 0. Solvers directs (priorité max — override tout cache IA)
             const directSolutionPeda = tryDirectSolve();
             if (directSolutionPeda) {
-                console.log('[Kwyk Tutor] Résolution directe (péda) — bypass cache');
+                LOG.info('Résolution directe (péda) — bypass cache');
                 cachedSolution = directSolutionPeda;
                 cachedSolution._exerciseHash = lastExerciseHash;
                 updateStatus('✓ Résolu (instantané)', 'success');
@@ -6666,7 +6536,7 @@ Réponse:
             const prefetched = exId ? getPrefetchedSolution(exId) : null;
 
             if (prefetched) {
-                console.log('[Kwyk Tutor] Utilisation solution prefetchée (péda)');
+                LOG.info('Utilisation solution prefetchée (péda)');
                 cachedSolution = prefetched.solution;
                 cachedSolution._exerciseHash = lastExerciseHash;
                 updateStatus('✓ Résolu (instantané)', 'success');
@@ -6674,7 +6544,7 @@ Réponse:
                 showLoading('Résolution...');
                 updateStatus('Calcul...', 'loading');
 
-                const result = await solveProblem();
+                let result = await solveProblem();
 
                 if (result.error) {
                     isLoading = false;
@@ -6684,14 +6554,16 @@ Réponse:
                     return;
                 }
 
+                // Retry silencieux si réponse vide (R1 — IA renvoie parfois objet vide)
+                if (!isValidSolution(result.solution)) {
+                    LOG.warn('Réponse IA vide, retry silencieux...');
+                    updateStatus('Retry...', 'loading');
+                    result = await solveProblem();
+                }
+
                 cachedSolution = result.solution;
 
-                // Vérifier que la solution a des réponses non-vides
-                const hasValidResponse = cachedSolution.reponses?.some(r =>
-                    (r.reponse && r.reponse.trim() !== '') ||
-                    (r.reponses && r.reponses.length > 0)
-                );
-                if (!hasValidResponse) {
+                if (!isValidSolution(cachedSolution)) {
                     cachedSolution = null;
                     isLoading = false;
                     disableButtons(false);
@@ -6952,7 +6824,7 @@ Réponse:
         let html = '<div class="kwyk-sign-table-wrapper">';
         html += '<table class="kwyk-sign-table">';
 
-        // V15: Alignement correct du tableau de signes
+        // Alignement correct du tableau de signes
         // -∞ au-dessus du premier signe, +∞ au-dessus du dernier signe
         // Colonnes vides seulement entre les valeurs critiques
         //
@@ -7270,6 +7142,33 @@ Réponse:
 
         let result = text;
 
+        // 0. LATEX → LISIBLE (nettoie les résidus LaTeX de l'IA avant tout autre traitement)
+        // Délimiteurs math
+        result = result.replace(/\\\(|\\\)/g, '');
+        result = result.replace(/\\\[|\\\]/g, '');
+        result = result.replace(/\$\$([^$]+)\$\$/g, '$1');
+        result = result.replace(/\$([^$\n]+)\$/g, '$1');
+        // Vecteurs LaTeX → span kwyk-vec (avant la détection AB→ ci-dessous)
+        result = result.replace(/\\overrightarrow\{([^}]+)\}/g, '<span class="kwyk-vec">$1</span>');
+        result = result.replace(/\\vec\{([^}]+)\}/g, '<span class="kwyk-vec">$1</span>');
+        // Fractions LaTeX → (a)/(b) (puis converties en HTML ci-dessous)
+        result = result.replace(/\\d?frac\{([^}]+)\}\{([^}]+)\}/g, '($1)/($2)');
+        // Racines LaTeX
+        result = result.replace(/\\sqrt\{([^}]+)\}/g, '√($1)');
+        // Crochets inverses interdits → directs
+        result = result.replace(/\\left\]/g, ']').replace(/\\right\[/g, '[');
+        result = result.replace(/\\left\[/g, '[').replace(/\\right\]/g, ']');
+        result = result.replace(/\\left\(/g, '(').replace(/\\right\)/g, ')');
+        // Opérateurs et symboles
+        result = result.replace(/\\infty/g, '∞');
+        result = result.replace(/\\times/g, '×');
+        result = result.replace(/\\cdot/g, '·');
+        result = result.replace(/\\neq/g, '≠');
+        result = result.replace(/\\leq/g, '≤');
+        result = result.replace(/\\geq/g, '≥');
+        result = result.replace(/\\text\{([^}]+)\}/g, '$1');
+        result = result.replace(/\\[a-zA-Z]+\{([^}]+)\}/g, '$1'); // fallback: \cmd{x} → x
+
         // 1. PUISSANCES : x^2 → x²
         const superscripts = {
             '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
@@ -7351,6 +7250,12 @@ Réponse:
         result = result.replace(/!=/g, '≠');
         result = result.replace(/\*/g, '×');
 
+        // Vecteurs : AB→ ou u→ → <span class="kwyk-vec">AB</span>
+        // Matcher 2 majuscules (AB→) ou 1 lettre quelconque (u→, v→)
+        // Le → doit être directement après les lettres (pas d'espace) → pas de faux positifs avec "texte → résultat"
+        result = result.replace(/([A-Z]{1,2}|[a-zA-Z])\u2192/g,
+            '<span class="kwyk-vec">$1</span>');
+
         return result;
     }
 
@@ -7388,6 +7293,7 @@ Réponse:
                 `  Q${i + 1}`,
                 '| DOM type:', q.type,
                 '| questionType:', q.questionType,
+                '| answerFormat:', q.answerFormat || '?',
                 '| context:', (q.context ?? '').substring(0, 150)
             );
         });
@@ -7415,7 +7321,6 @@ Réponse:
         console.log('%c→ Objet retourné pour inspection dans la console', 'color:#6b7280;font-size:11px');
         return s;
     };
-    console.log('[Kwyk Tutor] Debug helper prêt → taper kwykDebug() dans la console');
 
     // Bridge MAIN world : répond aux requêtes de debug venant d'inject.js
     document.addEventListener('kwyk:debug:request', function() {
@@ -7465,3 +7370,4 @@ Réponse:
     }
 
 })();
+

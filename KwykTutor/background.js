@@ -15,8 +15,15 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 });
 
 // Après reload de l'extension, recharger l'onglet Kwyk
+// À l'installation, ouvrir la page de bienvenue
 chrome.runtime.onInstalled.addListener(async (details) => {
     console.log('[Kwyk Background] onInstalled - reason:', details.reason);
+
+    if (details.reason === 'install') {
+        // Première installation → page de bienvenue
+        chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+    }
+
     if (details.reason === 'update') {
         const data = await chrome.storage.local.get('kwykReloadTabId');
         if (data.kwykReloadTabId) {

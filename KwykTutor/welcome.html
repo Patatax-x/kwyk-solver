@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bienvenue sur Kwyk Tutor !</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 30px 20px;
+        }
+
+        .container {
+            max-width: 680px;
+            width: 100%;
+        }
+
+        .hero {
+            text-align: center;
+            color: white;
+            margin-bottom: 32px;
+        }
+
+        .hero .emoji {
+            font-size: 64px;
+            display: block;
+            margin-bottom: 16px;
+        }
+
+        .hero h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .hero p {
+            font-size: 17px;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 36px;
+            margin-bottom: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+
+        .card h2 {
+            font-size: 20px;
+            color: #212529;
+            margin-bottom: 24px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #f0f4ff;
+        }
+
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            gap: 18px;
+        }
+
+        .step-num {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .step-content h3 {
+            font-size: 15px;
+            color: #212529;
+            margin-bottom: 4px;
+        }
+
+        .step-content p {
+            font-size: 13px;
+            color: #6c757d;
+            line-height: 1.5;
+        }
+
+        .highlight-box {
+            background: #f0f4ff;
+            border: 2px solid #667eea;
+            border-radius: 14px;
+            padding: 20px 24px;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .highlight-box .icon {
+            font-size: 40px;
+            flex-shrink: 0;
+        }
+
+        .highlight-box p {
+            font-size: 14px;
+            color: #3730a3;
+            line-height: 1.6;
+        }
+
+        .highlight-box strong {
+            display: block;
+            font-size: 15px;
+            margin-bottom: 4px;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 14px 28px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 6px 20px rgba(102,126,234,0.5);
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #f8f9fa;
+            color: #495057;
+            border: 1px solid #dee2e6;
+        }
+
+        .btn-secondary:hover {
+            background: #e9ecef;
+        }
+
+        .modes {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 14px;
+            margin-top: 4px;
+        }
+
+        .mode-card {
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .mode-card .mode-icon {
+            font-size: 28px;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .mode-card h4 {
+            font-size: 14px;
+            color: #212529;
+            margin-bottom: 4px;
+        }
+
+        .mode-card p {
+            font-size: 12px;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="hero">
+            <span class="emoji">🎓</span>
+            <h1>Bienvenue sur Kwyk Tutor !</h1>
+            <p>Ton assistant pédagogique pour la plateforme de mathématiques kwyk.fr</p>
+        </div>
+
+        <div class="card">
+            <h2>📍 Comment ça marche ?</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-num">1</div>
+                    <div class="step-content">
+                        <h3>Va sur kwyk.fr et ouvre un devoir</h3>
+                        <p>L'extension se déclenche automatiquement sur tous les exercices de mathématiques.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">2</div>
+                    <div class="step-content">
+                        <h3>Clique sur le bouton violet en bas à droite 🟣</h3>
+                        <p>Un bouton "KT" apparaît dans le coin inférieur droit de la page. Clique dessus pour ouvrir le panneau d'aide.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">3</div>
+                    <div class="step-content">
+                        <h3>Choisis ton mode d'aide</h3>
+                        <p>Utilise <strong>Explique</strong> pour comprendre, <strong>Indice</strong> pour un coup de pouce, ou <strong>Réponse</strong> pour voir la solution.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="highlight-box">
+                <span class="icon">⌨️</span>
+                <p>
+                    <strong>Raccourci clavier</strong>
+                    Appuie sur <strong>Ctrl + Entrée</strong> pour afficher/masquer rapidement le bouton et le panneau.
+                    Tu peux changer ce raccourci dans les options.
+                </p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🚀 3 modes disponibles</h2>
+            <div class="modes">
+                <div class="mode-card">
+                    <span class="mode-icon">📖</span>
+                    <h4>Pédagogique</h4>
+                    <p>Explications étape par étape pour vraiment comprendre</p>
+                </div>
+                <div class="mode-card">
+                    <span class="mode-icon">😈</span>
+                    <h4>Troll</h4>
+                    <p>Remplit automatiquement les réponses</p>
+                </div>
+                <div class="mode-card">
+                    <span class="mode-icon">📝</span>
+                    <h4>Révision</h4>
+                    <p>Fiche de révision interactive à la fin du devoir</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>⚙️ Avant de commencer</h2>
+            <p style="font-size: 14px; color: #6c757d; margin-bottom: 20px;">
+                Une clé API IA est nécessaire pour faire fonctionner l'assistant. Mistral AI est recommandé — c'est <strong>gratuit</strong> sur
+                <a href="https://console.mistral.ai/" target="_blank" style="color: #667eea;">console.mistral.ai</a>.
+                Génère une clé et colle-la dans les options.
+            </p>
+            <div class="btn-row">
+                <button class="btn btn-primary" id="btn-options">⚙️ Ouvrir les options</button>
+                <a href="https://www.kwyk.fr" target="_blank" class="btn btn-secondary">🌐 Aller sur Kwyk.fr</a>
+            </div>
+        </div>
+    </div>
+
+    <div style="text-align:center;color:white;font-size:12px;opacity:0.85;margin-top:20px;padding:0 10px;line-height:1.6;">
+        Kwyk Tutor v2.0.1 — Outil pédagogique indépendant, non affilié à Kwyk SAS<br>
+        L'utilisateur est seul responsable du respect des règles de sa plateforme et de son établissement.<br>
+        <a href="https://patatax-formulaire.notion.site/Conditions-d-Utilisation-Kwyk-Tutor-35cc3ccd8936818f8306d0374eaaf9d6" target="_blank" style="color:white;text-decoration:underline;">Conditions d'utilisation</a> · <a href="https://patatax-formulaire.notion.site/Politique-de-Confidentialit-Kwyk-Tutor-35cc3ccd89368192a4a0de5db53f6db5" target="_blank" style="color:white;text-decoration:underline;">Politique de confidentialité</a>
+    </div>
+
+    <script src="welcome.js"></script>
+</body>
+</html>
