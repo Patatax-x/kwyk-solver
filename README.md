@@ -4,6 +4,7 @@
 
 [![Edge](https://img.shields.io/badge/Microsoft%20Edge-Installer-0078d4?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg)
 [![Firefox](https://img.shields.io/badge/Firefox-Installer-FF7139?logo=firefox&logoColor=white)](LIEN_AMO)
+[![Site](https://img.shields.io/badge/Site%20officiel-Voir-a78bfa)](https://patatax-x.github.io/kwyk-solver/)
 [![License](https://img.shields.io/badge/Licence-Personnelle-lightgrey)](https://patatax-formulaire.notion.site/Conditions-d-Utilisation-Kwyk-Tutor-35cc3ccd8936818f8306d0374eaaf9d6)
 
 ## ✨ Fonctionnalités
@@ -23,42 +24,21 @@
 
 ✅ Gratuit | Sans compte | Sans clé API | Fonctionne directement sur kwyk.fr
 
-## 🖥️ Aperçu
-
-### Réponse directe
-![Kwyk Tutor réponse directe](https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/01-reponse-directe.png)
-
-### Explication étape par étape
-![Kwyk Tutor explication mathématiques](https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/02-explication-etape-par-etape.png)
-
-### Sélection du mode d'aide
-![Kwyk Tutor popup modes](https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/03-popup-modes.png)
-
-### Mode Troll
-![Kwyk Tutor mode troll](https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/04-mode-troll-correct.png)
-
-### Fiche de révision interactive
-![Kwyk Tutor fiche révision](https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/5%20-%20Fiche%20r%C3%A9cap.png)
-
 ## 🔧 Comment ça marche ?
 
 1. Ouvre un exercice sur [kwyk.fr](https://www.kwyk.fr)
-2. Clique le bouton violet **KT** en bas à droite
+2. Clique le bouton violet en bas à droite de la page
 3. Choisis ton niveau d'aide : Explique, Indice ou Révision
 4. L'IA analyse l'énoncé et génère une aide adaptée
 
 ## ⭐ Noter l'extension
-
-Un avis aide d'autres élèves à trouver Kwyk Tutor. Cela prend 30 secondes.
 
 - [Noter sur Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg)
 - [Noter sur Firefox AMO](LIEN_AMO_REVIEWS)
 
 ## ⚠️ Avertissement
 
-Kwyk Tutor est un outil pédagogique indépendant, **non affilié à Kwyk SAS**.
-
-L'utilisateur est **seul responsable** du respect des règles de son établissement. Utiliser cette extension lors d'un contrôle, d'un devoir noté ou dans tout contexte interdit par le professeur engage uniquement la responsabilité de l'utilisateur.
+Kwyk Tutor est un outil pédagogique indépendant, **non affilié à Kwyk SAS**. L'utilisateur est **seul responsable** du respect des règles de son établissement.
 
 ## 📜 Liens légaux
 
