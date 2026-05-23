@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kwyk Tutor | Assistant IA pour kwyk.fr</title>
-  <meta name="description" content="Extension Chrome et Firefox gratuite pour kwyk.fr. Explications étape par étape, indices et fiche de révision générés par IA. Sans compte, sans clé API.">
+  <meta name="description" content="Extension Chrome, Edge et Firefox gratuite pour kwyk.fr. Explications étape par étape, indices et fiche de révision générés par IA. Sans compte, sans clé API.">
   <meta name="keywords" content="kwyk, kwyk.fr, extension kwyk, aide kwyk, kwyk tutor, mathematiques lycee, extension chrome kwyk, extension firefox kwyk, IA maths">
   <meta property="og:title" content="Kwyk Tutor | Assistant IA pour kwyk.fr">
-  <meta property="og:description" content="Extension gratuite Chrome et Firefox. Comprends tes exercices kwyk.fr grâce à l'IA.">
-  <meta property="og:image" content="https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/02-explication-etape-par-etape.png">
+  <meta property="og:description" content="Extension gratuite Chrome, Edge et Firefox. Comprends tes exercices kwyk.fr grâce à l'IA.">
+  <meta property="og:image" content="screenshots/02-explication-etape-par-etape.png">
   <meta property="og:url" content="https://patatax-x.github.io/kwyk-solver/">
   <meta name="twitter:card" content="summary_large_image">
   <style>
@@ -28,23 +28,26 @@
     .nav-links{display:flex;gap:20px;font-size:13px}
     .nav-links a{color:#aaa}
     .nav-links a:hover{color:white}
-    .btn-nav{background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:8px 18px;border-radius:8px;font-size:14px;font-weight:700}
+    .btn-nav{background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:8px 18px;border-radius:8px;font-size:14px;font-weight:700;white-space:nowrap}
 
     .hero{
       background:linear-gradient(160deg,#1a1a3e 0%,#0a0a0f 55%);
-      text-align:center;padding:60px 20px 50px;position:relative;overflow:hidden
+      text-align:center;padding:56px 20px 48px;position:relative;overflow:hidden
     }
     .hero::before{
       content:'';position:absolute;top:-150px;left:50%;transform:translateX(-50%);
       width:500px;height:500px;
       background:radial-gradient(circle,#667eea2a 0%,transparent 70%);pointer-events:none
     }
-    .hero-icon{width:72px;height:72px;border-radius:18px;margin:0 auto 20px;display:block;box-shadow:0 8px 32px #667eea44}
-    .hero .badge{display:inline-block;background:#667eea22;border:1px solid #667eea55;color:#a78bfa;font-size:12px;padding:5px 12px;border-radius:20px;margin-bottom:16px}
+    .hero-icon{width:72px;height:72px;border-radius:18px;margin:0 auto 18px;display:block;box-shadow:0 8px 32px #667eea44}
+    .badge{display:inline-block;background:#667eea22;border:1px solid #667eea55;color:#a78bfa;font-size:12px;padding:5px 12px;border-radius:20px;margin-bottom:16px}
     .hero h1{font-size:44px;font-weight:900;line-height:1.1;margin-bottom:14px}
     .hero h1 span{background:linear-gradient(135deg,#667eea,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
     .hero p{font-size:17px;color:#bbb;max-width:520px;margin:0 auto 28px;line-height:1.6}
-    .hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:12px}
+    .hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:10px}
+    .hero-note{font-size:12px;color:#666;line-height:1.7}
+    .hero-note a{color:#888;text-decoration:underline}
+
     .btn{padding:13px 26px;border-radius:10px;font-size:15px;font-weight:700;display:inline-flex;align-items:center;gap:8px;transition:transform 0.2s,box-shadow 0.2s;cursor:pointer}
     .btn:hover{transform:translateY(-2px)}
     .btn-edge{background:#0078d4;color:white}
@@ -52,22 +55,17 @@
     .btn-firefox{background:#ff7139;color:white}
     .btn-firefox:hover{box-shadow:0 6px 24px #ff713955}
     .btn-ghost{background:#ffffff11;color:#ddd;border:1px solid #ffffff22}
-    .hero-note{font-size:12px;color:#555}
-
-    /* Bouton intelligent */
-    .smart-install{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
 
     .wrap{max-width:920px;margin:0 auto;padding:0 24px}
-
-    section{padding:52px 0}
+    section{padding:48px 0}
     .section-label{text-align:center;color:#a78bfa;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}
     h2{text-align:center;font-size:30px;font-weight:800;margin-bottom:10px}
-    .sub{text-align:center;color:#999;font-size:16px;max-width:560px;margin:0 auto 36px;line-height:1.6}
+    .sub{text-align:center;color:#999;font-size:16px;max-width:560px;margin:0 auto 32px;line-height:1.6}
 
-    .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+    .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
     .card{background:#111118;border:1px solid #1e1e2e;border-radius:14px;padding:22px;transition:border-color 0.2s}
     .card:hover{border-color:#667eea44}
-    .card .icon{font-size:30px;display:block;margin-bottom:10px}
+    .card .icon{font-size:28px;display:block;margin-bottom:10px}
     .card h3{font-size:15px;margin-bottom:6px}
     .card p{font-size:13px;color:#888;line-height:1.5}
 
@@ -77,38 +75,38 @@
     .step h3{font-size:14px;margin-bottom:6px}
     .step p{font-size:13px;color:#888;line-height:1.5}
 
-    .screenshots{display:flex;flex-direction:column;gap:32px}
+    .chrome-note{background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:14px 18px;font-size:13px;color:#aaa;margin-top:20px;text-align:center;line-height:1.6}
+    .chrome-note strong{color:#f0f0f0}
+
+    .screenshots{display:flex;flex-direction:column;gap:28px}
     .sc-item{text-align:center}
     .sc-item .caption{font-size:13px;color:#777;margin-bottom:10px}
     .sc-item img{max-width:100%;border-radius:12px;border:1px solid #1e1e2e;box-shadow:0 8px 32px rgba(0,0,0,0.5)}
 
-    .rate-box{background:#111118;border:1px solid #1e1e2e;border-radius:18px;padding:36px;text-align:center}
-    .rate-box h2{margin-bottom:10px}
-    .rate-box p{color:#999;font-size:15px;margin-bottom:24px;max-width:440px;margin-left:auto;margin-right:auto}
+    .rate-box{background:#111118;border:1px solid #1e1e2e;border-radius:18px;padding:32px;text-align:center}
+    .rate-box p{color:#999;font-size:15px;margin:10px auto 22px;max-width:440px}
     .rate-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-    .btn-rate{padding:11px 22px;border-radius:10px;font-size:14px;font-weight:700;display:inline-flex;align-items:center;gap:7px;transition:opacity 0.2s}
+    .btn-rate{padding:11px 22px;border-radius:10px;font-size:14px;font-weight:700;display:inline-flex;align-items:center;gap:7px}
     .btn-rate:hover{opacity:0.8}
     .btn-rate-edge{background:#0078d422;border:1px solid #0078d466;color:#5bc0f8}
     .btn-rate-ff{background:#ff713922;border:1px solid #ff713966;color:#ff9a6c}
 
-    .share-box{text-align:center;padding:40px 0}
-    .share-box h2{margin-bottom:8px}
-    .share-box p{color:#999;font-size:14px;margin-bottom:20px}
+    .share-box{text-align:center;padding:36px 0}
+    .share-box p{color:#999;font-size:14px;margin:8px 0 18px}
     .share-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-    .sbtn{padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px;transition:opacity 0.2s;cursor:pointer;font-family:inherit;border:none}
+    .sbtn{padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-family:inherit;border:none;transition:opacity 0.2s}
     .sbtn:hover{opacity:0.8}
     .s-reddit{background:#ff4500;color:white}
     .s-twitter{background:#1da1f2;color:white}
     .s-whatsapp{background:#25d366;color:white}
     .s-copy{background:#222;color:#ccc;border:1px solid #333}
 
-    .warning{background:#1a1400;border:1px solid #f59e0b33;border-radius:10px;padding:16px 20px;font-size:12px;color:#999;line-height:1.7;margin-top:32px}
+    .warning{background:#1a1400;border:1px solid #f59e0b33;border-radius:10px;padding:16px 20px;font-size:12px;color:#999;line-height:1.7;margin-top:28px}
     .warning strong{color:#f59e0b}
     .warning a{color:#f59e0b}
 
     hr.div{border:none;border-top:1px solid #111118}
-
-    footer{text-align:center;padding:24px;font-size:12px;color:#444;border-top:1px solid #111}
+    footer{text-align:center;padding:22px;font-size:12px;color:#444;border-top:1px solid #111}
     footer a{color:#555}
     footer a:hover{color:#aaa}
   </style>
@@ -117,34 +115,37 @@
 
 <nav>
   <div class="logo">
-    <img src="icon.png" alt="Kwyk Tutor">
+    <img src="icon.png" alt="Kwyk Tutor" onerror="this.style.display='none'">
     Kwyk <span>Tutor</span>
   </div>
   <div class="nav-links">
+    <a href="#pourquoi">Pourquoi</a>
     <a href="#comment">Comment</a>
     <a href="#modes">Modes</a>
-    <a href="#apercu">Aperçu</a>
     <a href="#noter">Noter</a>
   </div>
   <a class="btn-nav" id="nav-install" href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">Installer</a>
 </nav>
 
 <div class="hero">
-  <img class="hero-icon" src="icon.png" alt="Kwyk Tutor">
+  <img class="hero-icon" src="icon.png" alt="Kwyk Tutor" onerror="this.style.display='none'">
   <div class="badge">✨ Gratuit · Sans compte · Sans clé API</div>
   <h1>L'assistant IA pour<br><span>kwyk.fr</span></h1>
   <p>Comprends tes exercices de maths, pas juste les réponses. Explications étape par étape, indices personnalisés, fiche de révision complète.</p>
-  <div class="hero-btns smart-install" id="hero-btns">
-    <a class="btn btn-edge" id="btn-edge" href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">⬇️ Installer sur Edge</a>
-    <a class="btn btn-firefox" id="btn-firefox" href="LIEN_AMO" target="_blank">⬇️ Installer sur Firefox</a>
+  <div class="hero-btns">
+    <a class="btn btn-edge" href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">⬇️ Edge</a>
+    <a class="btn btn-firefox" href="LIEN_AMO" target="_blank">⬇️ Firefox</a>
     <a class="btn btn-ghost" href="https://github.com/Patatax-x/kwyk-solver" target="_blank">⭐ GitHub</a>
   </div>
-  <p class="hero-note">Compatible Microsoft Edge et Firefox</p>
+  <p class="hero-note">
+    Compatible Microsoft Edge · Firefox · <strong style="color:#aaa">Chrome</strong><br>
+    Utilisateurs Chrome : <a href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">installer depuis le Edge Add-ons store</a>, fonctionne aussi sur Chrome.
+  </p>
 </div>
 
 <div class="wrap">
 
-  <section>
+  <section id="pourquoi">
     <div class="section-label">Pourquoi Kwyk Tutor ?</div>
     <h2>Fait pour vraiment progresser</h2>
     <p class="sub">Kwyk.fr donne des exercices mais pas d'explications. Kwyk Tutor comble ce manque avec une aide pédagogique directement sur la page.</p>
@@ -157,7 +158,7 @@
       <div class="card">
         <span class="icon">⚡</span>
         <h3>Instantané</h3>
-        <p>Aide disponible en quelques secondes directement sur kwyk.fr. Aucune installation complexe.</p>
+        <p>Aide disponible en quelques secondes directement sur la page. Aucune installation complexe.</p>
       </div>
       <div class="card">
         <span class="icon">🔒</span>
@@ -187,13 +188,16 @@
       <div class="step">
         <div class="step-num">3</div>
         <h3>Choisis ton aide</h3>
-        <p>Explique, Indice ou Révision. L'IA génère une aide adaptée à l'exercice.</p>
+        <p>Explique, Indice ou Révision. L'IA génère une aide adaptée à l'exercice en cours.</p>
       </div>
       <div class="step">
         <div class="step-num">⌨️</div>
         <h3>Raccourci Ctrl+Entrée</h3>
-        <p>Affiche ou masque rapidement le panneau depuis n'importe quelle page.</p>
+        <p>Affiche ou masque rapidement le panneau depuis n'importe quelle page kwyk.fr.</p>
       </div>
+    </div>
+    <div class="chrome-note">
+      💻 <strong>Utilisateurs Chrome :</strong> installe l'extension depuis le <a href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank" style="color:#a78bfa">Edge Add-ons store</a>. Elle est compatible et fonctionne parfaitement sur Chrome.
     </div>
   </section>
 
@@ -236,19 +240,19 @@
     <div class="screenshots">
       <div class="sc-item">
         <p class="caption">Réponse directe avec la règle</p>
-        <img src="https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/01-reponse-directe.png" alt="Kwyk Tutor réponse directe kwyk.fr">
+        <img src="screenshots/01-reponse-directe.png" alt="Kwyk Tutor réponse directe kwyk.fr">
       </div>
       <div class="sc-item">
         <p class="caption">Explication étape par étape</p>
-        <img src="https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/02-explication-etape-par-etape.png" alt="Kwyk Tutor explication mathématiques lycée">
+        <img src="screenshots/02-explication-etape-par-etape.png" alt="Kwyk Tutor explication mathématiques lycée">
       </div>
       <div class="sc-item">
         <p class="caption">Sélection du mode d'aide</p>
-        <img src="https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/03-popup-modes.png" alt="Kwyk Tutor popup sélection mode">
+        <img src="screenshots/03-popup-modes.png" alt="Kwyk Tutor popup sélection mode">
       </div>
       <div class="sc-item">
         <p class="caption">Fiche de révision interactive</p>
-        <img src="https://raw.githubusercontent.com/Patatax-x/kwyk-solver/main/screenshots/5%20-%20Fiche%20r%C3%A9cap.png" alt="Kwyk Tutor fiche de révision kwyk.fr">
+        <img src="screenshots/5%20-%20Fiche%20r%C3%A9cap.png" alt="Kwyk Tutor fiche de révision kwyk.fr">
       </div>
     </div>
   </section>
@@ -258,7 +262,7 @@
   <section id="noter">
     <div class="rate-box">
       <h2>⭐ Notez l'extension</h2>
-      <p>Un avis positif aide d'autres élèves à trouver Kwyk Tutor et fait progresser le projet. Cela prend 30 secondes.</p>
+      <p>Un avis positif aide d'autres élèves à trouver Kwyk Tutor. Cela prend 30 secondes.</p>
       <div class="rate-btns">
         <a class="btn-rate btn-rate-edge" href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">⭐ Noter sur Edge</a>
         <a class="btn-rate btn-rate-ff" href="LIEN_AMO_REVIEWS" target="_blank">⭐ Noter sur Firefox</a>
@@ -290,23 +294,15 @@
 </footer>
 
 <script>
-  // Détection navigateur : met en avant le bon bouton
   (function() {
     const ua = navigator.userAgent;
-    const isEdge = ua.includes('Edg/');
-    const isFirefox = ua.includes('Firefox/');
-    const btnEdge = document.getElementById('btn-edge');
-    const btnFF = document.getElementById('btn-firefox');
-    const navInstall = document.getElementById('nav-install');
-
-    if (isEdge) {
-      btnFF.style.opacity = '0.45';
-      navInstall.href = 'https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg';
-      navInstall.textContent = 'Installer sur Edge';
-    } else if (isFirefox) {
-      btnEdge.style.opacity = '0.45';
-      navInstall.href = 'LIEN_AMO';
-      navInstall.textContent = 'Installer sur Firefox';
+    const nav = document.getElementById('nav-install');
+    if (ua.includes('Firefox/')) {
+      nav.href = 'LIEN_AMO';
+      nav.textContent = 'Installer sur Firefox';
+    } else {
+      nav.href = 'https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg';
+      nav.textContent = ua.includes('Edg/') ? 'Installer sur Edge' : 'Installer (Edge/Chrome)';
     }
   })();
 </script>
