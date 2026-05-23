@@ -11,8 +11,9 @@
   <meta property="og:image" content="screenshots/02-explication-etape-par-etape.png">
   <meta property="og:url" content="https://patatax-x.github.io/kwyk-solver/">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" type="image/png" href="icon.png">
-  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="shortcut icon" href="icon.png?v=2">
+  <link rel="icon" type="image/png" sizes="128x128" href="icon.png?v=2">
+  <link rel="apple-touch-icon" href="icon.png?v=2">
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     html{scroll-behavior:smooth}
@@ -93,16 +94,16 @@
     .tag-revision{background:#22c55e22;color:#4ade80;border:1px solid #22c55e44}
 
     /* CARROUSEL */
-    .carousel-wrap{position:relative;background:#111118;border:1px solid #1e1e2e;border-radius:16px}
-    .carousel-clip{overflow:hidden;border-radius:14px 14px 0 0}
+    .carousel-outer{position:relative;padding:0 52px}
+    .carousel-wrap{border-radius:16px;overflow:hidden;background:#111118;border:1px solid #1e1e2e}
     .carousel-inner{display:flex;transition:transform 0.4s cubic-bezier(.4,0,.2,1);will-change:transform}
     .slide{min-width:100%;padding:24px;display:flex;flex-direction:column;align-items:center;gap:12px}
     .slide .caption{font-size:13px;color:#777;text-align:center}
     .slide img{max-width:100%;max-height:500px;object-fit:contain;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.5);display:block}
-    .c-btn{position:absolute;top:50%;transform:translateY(-50%);background:#ffffff18;border:1px solid #ffffff22;color:white;width:40px;height:40px;border-radius:50%;font-size:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.2s;z-index:2;user-select:none}
-    .c-btn:hover{background:#ffffff33}
-    .c-prev{left:12px}
-    .c-next{right:12px}
+    .c-btn{position:absolute;top:50%;transform:translateY(-50%);background:#1e1e2e;border:1px solid #333;color:white;width:40px;height:40px;border-radius:50%;font-size:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.2s;z-index:2;user-select:none}
+    .c-btn:hover{background:#2a2a3a}
+    .c-prev{left:4px}
+    .c-next{right:4px}
     .c-dots{display:flex;gap:8px;justify-content:center;padding:14px 0 18px}
     .dot{width:8px;height:8px;border-radius:50%;background:#2a2a3a;cursor:pointer;transition:background 0.2s,transform 0.2s}
     .dot.active{background:#a78bfa;transform:scale(1.3)}
@@ -161,10 +162,7 @@
     <a class="btn btn-firefox" href="https://addons.mozilla.org/fr/firefox/addon/kwyk-tutor/" target="_blank">⬇️ Firefox</a>
     <a class="btn btn-ghost" href="https://github.com/Patatax-x/kwyk-solver" target="_blank">⭐ GitHub</a>
   </div>
-  <p class="hero-note">
-    Compatible Microsoft Edge · Firefox · <strong style="color:#aaa">Chrome</strong><br>
-    Utilisateurs Chrome : <a href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">installer depuis le Edge Add-ons store</a>, fonctionne aussi sur Chrome.
-  </p>
+  <p class="hero-note">Compatible Microsoft Edge · Firefox · Chrome</p>
 </div>
 
 <div class="wrap">
@@ -223,9 +221,6 @@
         <p>Affiche ou masque rapidement le panneau depuis n'importe quelle page kwyk.fr.</p>
       </div>
     </div>
-    <div class="chrome-note">
-      💻 <strong>Utilisateurs Chrome :</strong> installe l'extension depuis le <a href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank" style="color:#a78bfa">Edge Add-ons store</a>. Elle est compatible et fonctionne parfaitement sur Chrome.
-    </div>
   </section>
 
   <hr class="div">
@@ -259,32 +254,32 @@
     <div class="section-label">Aperçu</div>
     <h2>L'extension en action</h2>
     <p class="sub" style="margin-bottom:20px">Utilise les flèches ou glisse pour naviguer.</p>
-    <div class="carousel-wrap" id="carousel">
+    <div class="carousel-outer">
       <button class="c-btn c-prev" id="c-prev">&#8249;</button>
       <button class="c-btn c-next" id="c-next">&#8250;</button>
-      <div class="carousel-clip">
-      <div class="carousel-inner" id="c-inner">
-        <div class="slide">
-          <p class="caption">Réponse directe avec la règle</p>
-          <img src="screenshots/01-reponse-directe.png" alt="Kwyk Tutor réponse directe kwyk.fr">
+      <div class="carousel-wrap" id="carousel">
+        <div class="carousel-inner" id="c-inner">
+          <div class="slide">
+            <p class="caption">Réponse directe avec la règle</p>
+            <img src="screenshots/01-reponse-directe.png" alt="Kwyk Tutor réponse directe kwyk.fr">
+          </div>
+          <div class="slide">
+            <p class="caption">Explication étape par étape</p>
+            <img src="screenshots/02-explication-etape-par-etape.png" alt="Kwyk Tutor explication mathématiques lycée">
+          </div>
+          <div class="slide">
+            <p class="caption">Sélection du mode d'aide</p>
+            <img src="screenshots/03-popup-modes.png" alt="Kwyk Tutor popup sélection mode">
+          </div>
+          <div class="slide">
+            <p class="caption">Mode Troll en action</p>
+            <img src="screenshots/04-mode-troll-correct.png" alt="Kwyk Tutor mode troll">
+          </div>
+          <div class="slide">
+            <p class="caption">Fiche de révision interactive</p>
+            <img src="screenshots/5%20-%20Fiche%20r%C3%A9cap.png" alt="Kwyk Tutor fiche de révision kwyk.fr">
+          </div>
         </div>
-        <div class="slide">
-          <p class="caption">Explication étape par étape</p>
-          <img src="screenshots/02-explication-etape-par-etape.png" alt="Kwyk Tutor explication mathématiques lycée">
-        </div>
-        <div class="slide">
-          <p class="caption">Sélection du mode d'aide</p>
-          <img src="screenshots/03-popup-modes.png" alt="Kwyk Tutor popup sélection mode">
-        </div>
-        <div class="slide">
-          <p class="caption">Mode Troll en action</p>
-          <img src="screenshots/04-mode-troll-correct.png" alt="Kwyk Tutor mode troll">
-        </div>
-        <div class="slide">
-          <p class="caption">Fiche de révision interactive</p>
-          <img src="screenshots/5%20-%20Fiche%20r%C3%A9cap.png" alt="Kwyk Tutor fiche de révision kwyk.fr">
-        </div>
-      </div>
       </div>
       <div class="c-dots" id="c-dots"></div>
     </div>
