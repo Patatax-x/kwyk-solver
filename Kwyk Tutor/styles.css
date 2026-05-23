@@ -1,0 +1,41 @@
+#kwyk-tutor-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  box-shadow: 0 2px 12px rgba(102,126,234,0.5);
+  cursor: pointer;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: white;
+  letter-spacing: 0.5px;
+}
+
+#kwyk-deprecated-popup {
+  position: fixed;
+  bottom: 82px;
+  right: 20px;
+  background: #1a1a2e;
+  border: 1px solid #e74c3c;
+  border-radius: 10px;
+  padding: 16px 18px;
+  z-index: 100001;
+  max-width: 280px;
+  box-shadow: 0 4px 20px rgba(231, 76, 60, 0.3);
+  animation: kwyk-popup-in 0.2s ease-out;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+@keyframes kwyk-popup-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
