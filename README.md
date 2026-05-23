@@ -1,8 +1,8 @@
 # 🎓 Kwyk Tutor | Assistant IA pour kwyk.fr
 
-> Extension Chrome et Firefox gratuite pour kwyk.fr. Comprends tes exercices de maths grâce à l'IA, pas juste les réponses.
+> Extension gratuite pour kwyk.fr. Comprends tes exercices de maths grâce à l'IA, pas juste les réponses.
 
-[![Edge](https://img.shields.io/badge/Microsoft%20Edge-Installer-0078d4?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg)
+[![Edge](https://img.shields.io/badge/Edge%20%2F%20Chrome-Installer-0078d4?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg)
 [![Firefox](https://img.shields.io/badge/Firefox-Installer-FF7139?logo=firefox&logoColor=white)](LIEN_AMO)
 [![Site](https://img.shields.io/badge/Site%20officiel-Voir-a78bfa)](https://patatax-x.github.io/kwyk-solver/)
 [![License](https://img.shields.io/badge/Licence-Personnelle-lightgrey)](https://patatax-formulaire.notion.site/Conditions-d-Utilisation-Kwyk-Tutor-35cc3ccd8936818f8306d0374eaaf9d6)
@@ -20,7 +20,10 @@
 | Navigateur | Lien |
 |---|---|
 | Microsoft Edge | [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg) |
+| Google Chrome | [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg) (compatible Chrome) |
 | Firefox | [Firefox AMO](LIEN_AMO) |
+
+> 💡 **Utilisateurs Chrome :** l'extension est disponible sur le Edge Add-ons store et fonctionne parfaitement sur Chrome.
 
 ✅ Gratuit | Sans compte | Sans clé API | Fonctionne directement sur kwyk.fr
 
@@ -33,12 +36,14 @@
 
 ## ⭐ Noter l'extension
 
+Un avis aide d'autres élèves à trouver Kwyk Tutor. Cela prend 30 secondes.
+
 - [Noter sur Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg)
 - [Noter sur Firefox AMO](LIEN_AMO_REVIEWS)
 
 ## ⚠️ Avertissement
 
-Kwyk Tutor est un outil pédagogique indépendant, **non affilié à Kwyk SAS**. L'utilisateur est **seul responsable** du respect des règles de son établissement.
+Kwyk Tutor est un outil pédagogique indépendant, **non affilié à Kwyk SAS**. L'utilisateur est **seul responsable** du respect des règles de son établissement. Utiliser cette extension lors d'un contrôle ou devoir noté interdit par le professeur engage uniquement la responsabilité de l'utilisateur.
 
 ## 📜 Liens légaux
 
