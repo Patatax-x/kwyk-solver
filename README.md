@@ -1,6 +1,6 @@
 # 🎓 Kwyk Tutor | Assistant IA pour kwyk.fr
 
-> Extension Chrome et Firefox gratuite pour kwyk.fr. Comprends tes exercices de maths grâce à l'IA — pas juste les réponses.
+> Extension Chrome et Firefox gratuite pour kwyk.fr. Comprends tes exercices de maths grâce à l'IA.
 
 [![Edge](https://img.shields.io/badge/Microsoft%20Edge-Installer-0078d4?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg)
 [![Firefox](https://img.shields.io/badge/Firefox-Installer-FF7139?logo=firefox&logoColor=white)](LIEN_AMO)
@@ -25,7 +25,7 @@
 | Microsoft Edge | [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg) |
 | Firefox | [Firefox AMO](LIEN_AMO) |
 
-✅ Gratuit — Sans compte — Sans clé API — Fonctionne directement sur kwyk.fr
+✅ Gratuit | Sans compte | Sans clé API | Fonctionne directement sur kwyk.fr
 
 ---
 
@@ -74,4 +74,4 @@ L'utilisateur est **seul responsable** du respect des règles de son établissem
 
 ## 👨‍💻 Développé par
 
-[Patatax](https://github.com/Patatax-x) — projet personnel bénévole, v2.1.1
+[Patatax](https://github.com/Patatax-x) | Projet personnel bénévole, v2.1.1
