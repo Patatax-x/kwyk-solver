@@ -10,11 +10,11 @@
 
 ## ✨ Fonctionnalités
 
-- 📖 **Mode Pédagogique** — explication complète avec la règle et les étapes de calcul
-- 💡 **Mode Indice** — coup de pouce sans dévoiler la réponse
-- 😈 **Mode Troll** — démontre que l'IA maîtrise les exercices *(non conseillé pour apprendre)*
-- 📝 **Mode Révision** — fiche interactive générée sur tout un devoir
-- ⌨️ Raccourci **Ctrl+Entrée** pour afficher/masquer le panneau
+- 📖 **Mode Pédagogique** : explication complète avec la règle et les étapes de calcul
+- 💡 **Mode Indice** : coup de pouce sans dévoiler la réponse
+- 😈 **Mode Troll** : démontre que l'IA maîtrise les exercices *(non conseillé pour apprendre)*
+- 📝 **Mode Révision** : fiche interactive générée sur tout un devoir
+- ⌨️ Raccourci **Ctrl+Entrée** : pour afficher/masquer le panneau
 
 ---
 
