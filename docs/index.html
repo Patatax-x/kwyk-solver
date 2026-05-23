@@ -4,24 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kwyk Tutor | Assistant IA pour kwyk.fr</title>
-  <meta name="description" content="Extension Chrome, Edge et Firefox gratuite pour kwyk.fr. Explications étape par étape, indices et fiche de révision générés par IA. Sans compte, sans clé API.">
+  <meta name="description" content="Extension Chrome, Edge et Firefox gratuite pour kwyk.fr. Explications étape par étape et fiche de révision générés par IA. Sans compte, sans clé API.">
   <meta name="keywords" content="kwyk, kwyk.fr, extension kwyk, aide kwyk, kwyk tutor, mathematiques lycee, extension chrome kwyk, extension firefox kwyk, IA maths">
   <meta property="og:title" content="Kwyk Tutor | Assistant IA pour kwyk.fr">
   <meta property="og:description" content="Extension gratuite Chrome, Edge et Firefox. Comprends tes exercices kwyk.fr grâce à l'IA.">
   <meta property="og:image" content="screenshots/02-explication-etape-par-etape.png">
   <meta property="og:url" content="https://patatax-x.github.io/kwyk-solver/">
   <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',sans-serif;background:#0a0a0f;color:#f0f0f0}
     a{color:#a78bfa;text-decoration:none}
 
-    nav{
-      position:sticky;top:0;z-index:100;
-      background:#0a0a0fdd;backdrop-filter:blur(12px);
-      border-bottom:1px solid #ffffff11;
-      padding:12px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px
-    }
+    /* NAV */
+    nav{position:sticky;top:0;z-index:100;background:#0a0a0fdd;backdrop-filter:blur(12px);border-bottom:1px solid #ffffff11;padding:12px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px}
     .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px}
     .logo img{width:28px;height:28px;border-radius:6px}
     .logo span{color:#a78bfa}
@@ -30,15 +28,9 @@
     .nav-links a:hover{color:white}
     .btn-nav{background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:8px 18px;border-radius:8px;font-size:14px;font-weight:700;white-space:nowrap}
 
-    .hero{
-      background:linear-gradient(160deg,#1a1a3e 0%,#0a0a0f 55%);
-      text-align:center;padding:56px 20px 48px;position:relative;overflow:hidden
-    }
-    .hero::before{
-      content:'';position:absolute;top:-150px;left:50%;transform:translateX(-50%);
-      width:500px;height:500px;
-      background:radial-gradient(circle,#667eea2a 0%,transparent 70%);pointer-events:none
-    }
+    /* HERO */
+    .hero{background:linear-gradient(160deg,#1a1a3e 0%,#0a0a0f 55%);text-align:center;padding:56px 20px 48px;position:relative;overflow:hidden}
+    .hero::before{content:'';position:absolute;top:-150px;left:50%;transform:translateX(-50%);width:500px;height:500px;background:radial-gradient(circle,#667eea2a 0%,transparent 70%);pointer-events:none}
     .hero-icon{width:72px;height:72px;border-radius:18px;margin:0 auto 18px;display:block;box-shadow:0 8px 32px #667eea44}
     .badge{display:inline-block;background:#667eea22;border:1px solid #667eea55;color:#a78bfa;font-size:12px;padding:5px 12px;border-radius:20px;margin-bottom:16px}
     .hero h1{font-size:44px;font-weight:900;line-height:1.1;margin-bottom:14px}
@@ -47,7 +39,6 @@
     .hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:10px}
     .hero-note{font-size:12px;color:#666;line-height:1.7}
     .hero-note a{color:#888;text-decoration:underline}
-
     .btn{padding:13px 26px;border-radius:10px;font-size:15px;font-weight:700;display:inline-flex;align-items:center;gap:8px;transition:transform 0.2s,box-shadow 0.2s;cursor:pointer}
     .btn:hover{transform:translateY(-2px)}
     .btn-edge{background:#0078d4;color:white}
@@ -56,41 +47,71 @@
     .btn-firefox:hover{box-shadow:0 6px 24px #ff713955}
     .btn-ghost{background:#ffffff11;color:#ddd;border:1px solid #ffffff22}
 
+    /* LAYOUT */
     .wrap{max-width:920px;margin:0 auto;padding:0 24px}
     section{padding:48px 0}
     .section-label{text-align:center;color:#a78bfa;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}
     h2{text-align:center;font-size:30px;font-weight:800;margin-bottom:10px}
     .sub{text-align:center;color:#999;font-size:16px;max-width:560px;margin:0 auto 32px;line-height:1.6}
 
-    .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
-    .card{background:#111118;border:1px solid #1e1e2e;border-radius:14px;padding:22px;transition:border-color 0.2s}
-    .card:hover{border-color:#667eea44}
-    .card .icon{font-size:28px;display:block;margin-bottom:10px}
-    .card h3{font-size:15px;margin-bottom:6px}
-    .card p{font-size:13px;color:#888;line-height:1.5}
+    /* POURQUOI — problème vs solution */
+    .ps-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+    @media(max-width:600px){.ps-grid{grid-template-columns:1fr}}
+    .ps-card{border-radius:16px;padding:28px}
+    .ps-card.problem{background:#1a0a0a;border:1px solid #dc354544}
+    .ps-card.solution{background:#0a1a10;border:1px solid #22c55e44}
+    .ps-card .ps-label{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px}
+    .ps-card.problem .ps-label{color:#f87171}
+    .ps-card.solution .ps-label{color:#4ade80}
+    .ps-card ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+    .ps-card ul li{font-size:14px;line-height:1.5;display:flex;gap:10px;align-items:flex-start}
+    .ps-card ul li span{flex-shrink:0;font-size:16px}
+    .ps-card.problem ul li{color:#fca5a5}
+    .ps-card.solution ul li{color:#86efac}
 
+    /* COMMENT */
     .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:20px}
     .step{text-align:center}
     .step-num{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);color:white;font-size:18px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
     .step h3{font-size:14px;margin-bottom:6px}
     .step p{font-size:13px;color:#888;line-height:1.5}
-
     .chrome-note{background:#111118;border:1px solid #1e1e2e;border-radius:10px;padding:14px 18px;font-size:13px;color:#aaa;margin-top:20px;text-align:center;line-height:1.6}
     .chrome-note strong{color:#f0f0f0}
 
-    .screenshots{display:flex;flex-direction:column;gap:28px}
-    .sc-item{text-align:center}
-    .sc-item .caption{font-size:13px;color:#777;margin-bottom:10px}
-    .sc-item img{max-width:100%;border-radius:12px;border:1px solid #1e1e2e;box-shadow:0 8px 32px rgba(0,0,0,0.5)}
+    /* MODES avec animations scroll */
+    .modes-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+    .mode-card{background:#111118;border:1px solid #1e1e2e;border-radius:14px;padding:24px;transition:border-color 0.3s,transform 0.3s,box-shadow 0.3s;opacity:0;transform:translateY(30px)}
+    .mode-card.visible{opacity:1;transform:translateY(0)}
+    .mode-card:hover{border-color:#667eea66;transform:translateY(-4px);box-shadow:0 12px 32px #667eea22}
+    .mode-card h3{font-size:16px;margin-bottom:8px}
+    .mode-card p{font-size:13px;color:#888;line-height:1.5}
+    .mode-card .mode-tag{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-bottom:10px}
+    .tag-peda{background:#667eea22;color:#a78bfa;border:1px solid #667eea44}
+    .tag-troll{background:#f59e0b22;color:#fbbf24;border:1px solid #f59e0b44}
+    .tag-revision{background:#22c55e22;color:#4ade80;border:1px solid #22c55e44}
 
+    /* CARROUSEL */
+    .carousel-wrap{position:relative;background:#111118;border:1px solid #1e1e2e;border-radius:16px;overflow:hidden}
+    .carousel-inner{display:flex;transition:transform 0.4s cubic-bezier(.4,0,.2,1);will-change:transform}
+    .slide{min-width:100%;padding:24px;display:flex;flex-direction:column;align-items:center;gap:12px}
+    .slide .caption{font-size:13px;color:#777;text-align:center}
+    .slide img{max-width:100%;max-height:500px;object-fit:contain;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.5);display:block}
+    .c-btn{position:absolute;top:50%;transform:translateY(-50%);background:#ffffff18;border:1px solid #ffffff22;color:white;width:40px;height:40px;border-radius:50%;font-size:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.2s;z-index:2;user-select:none}
+    .c-btn:hover{background:#ffffff33}
+    .c-prev{left:12px}
+    .c-next{right:12px}
+    .c-dots{display:flex;gap:8px;justify-content:center;padding:14px 0 18px}
+    .dot{width:8px;height:8px;border-radius:50%;background:#2a2a3a;cursor:pointer;transition:background 0.2s,transform 0.2s}
+    .dot.active{background:#a78bfa;transform:scale(1.3)}
+
+    /* NOTER / PARTAGER */
     .rate-box{background:#111118;border:1px solid #1e1e2e;border-radius:18px;padding:32px;text-align:center}
     .rate-box p{color:#999;font-size:15px;margin:10px auto 22px;max-width:440px}
     .rate-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-    .btn-rate{padding:11px 22px;border-radius:10px;font-size:14px;font-weight:700;display:inline-flex;align-items:center;gap:7px}
+    .btn-rate{padding:11px 22px;border-radius:10px;font-size:14px;font-weight:700;display:inline-flex;align-items:center;gap:7px;transition:opacity 0.2s}
     .btn-rate:hover{opacity:0.8}
     .btn-rate-edge{background:#0078d422;border:1px solid #0078d466;color:#5bc0f8}
     .btn-rate-ff{background:#ff713922;border:1px solid #ff713966;color:#ff9a6c}
-
     .share-box{text-align:center;padding:36px 0}
     .share-box p{color:#999;font-size:14px;margin:8px 0 18px}
     .share-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
@@ -131,15 +152,15 @@
   <img class="hero-icon" src="icon.png" alt="Kwyk Tutor" onerror="this.style.display='none'">
   <div class="badge">✨ Gratuit · Sans compte · Sans clé API</div>
   <h1>L'assistant IA pour<br><span>kwyk.fr</span></h1>
-  <p>Comprends tes exercices de maths, pas juste les réponses. Explications étape par étape, indices personnalisés, fiche de révision complète.</p>
+  <p>Comprends tes exercices de maths, pas juste les réponses. Explications étape par étape, fiche de révision complète.</p>
   <div class="hero-btns">
     <a class="btn btn-edge" href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">⬇️ Edge</a>
-    <a class="btn btn-firefox" href="LIEN_AMO" target="_blank">⬇️ Firefox</a>
+    <a class="btn btn-firefox" href="https://addons.mozilla.org/fr/firefox/addon/kwyk-tutor/" target="_blank">⬇️ Firefox</a>
     <a class="btn btn-ghost" href="https://github.com/Patatax-x/kwyk-solver" target="_blank">⭐ GitHub</a>
   </div>
   <p class="hero-note">
     Compatible Microsoft Edge · Firefox · <strong style="color:#aaa">Chrome</strong><br>
-    Utilisateurs Chrome : <a href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">installer depuis le Edge Add-ons store</a>.
+    Utilisateurs Chrome : <a href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">installer depuis le Edge Add-ons store</a>, fonctionne aussi sur Chrome.
   </p>
 </div>
 
@@ -147,23 +168,26 @@
 
   <section id="pourquoi">
     <div class="section-label">Pourquoi Kwyk Tutor ?</div>
-    <h2>Fait pour vraiment progresser</h2>
-    <p class="sub">Kwyk.fr donne des exercices mais pas d'explications. Kwyk Tutor comble ce manque avec une aide pédagogique directement sur la page.</p>
-    <div class="grid3">
-      <div class="card">
-        <span class="icon">🧠</span>
-        <h3>Comprendre, pas copier</h3>
-        <p>L'IA explique la règle, détaille les étapes et aide à comprendre pourquoi la réponse est correcte.</p>
+    <h2>Le problème, et la solution</h2>
+    <p class="sub">Kwyk propose des exercices de maths sans aucune explication. Kwyk Tutor comble ce manque.</p>
+    <div class="ps-grid">
+      <div class="ps-card problem">
+        <div class="ps-label">❌ Sans Kwyk Tutor</div>
+        <ul>
+          <li><span>😤</span>Tu bloques sur un exercice, aucune aide disponible sur la plateforme.</li>
+          <li><span>🔍</span>Tu cherches sur YouTube ou Google, tu perds du temps.</li>
+          <li><span>❓</span>Tu copies une réponse sans comprendre pourquoi elle est correcte.</li>
+          <li><span>📉</span>Tu fais les mêmes erreurs au contrôle.</li>
+        </ul>
       </div>
-      <div class="card">
-        <span class="icon">⚡</span>
-        <h3>Instantané</h3>
-        <p>Aide disponible en quelques secondes directement sur la page. Aucune installation complexe.</p>
-      </div>
-      <div class="card">
-        <span class="icon">🔒</span>
-        <h3>Aucune donnée personnelle</h3>
-        <p>Aucun compte requis. Seul l'énoncé de l'exercice est transmis à l'IA, rien d'autre.</p>
+      <div class="ps-card solution">
+        <div class="ps-label">✅ Avec Kwyk Tutor</div>
+        <ul>
+          <li><span>💡</span>L'IA détecte l'exercice et t'explique la règle directement sur la page.</li>
+          <li><span>📖</span>Tu comprends les étapes, pas juste la réponse.</li>
+          <li><span>📝</span>Une fiche de révision complète est générée à la fin du devoir.</li>
+          <li><span>🚀</span>Tu progresses vraiment pour le contrôle.</li>
+        </ul>
       </div>
     </div>
   </section>
@@ -188,7 +212,7 @@
       <div class="step">
         <div class="step-num">3</div>
         <h3>Choisis ton aide</h3>
-        <p>Explique, Indice ou Révision. L'IA génère une aide adaptée à l'exercice en cours.</p>
+        <p>Explique ou Révision. L'IA génère une aide adaptée à l'exercice en cours.</p>
       </div>
       <div class="step">
         <div class="step-num">⌨️</div>
@@ -206,27 +230,22 @@
   <section id="modes">
     <div class="section-label">Modes</div>
     <h2>3 niveaux d'aide</h2>
-    <p class="sub">Du coup de pouce discret à la fiche de révision complète.</p>
-    <div class="grid3">
-      <div class="card">
-        <span class="icon">📖</span>
-        <h3>Pédagogique</h3>
-        <p>Règle + explication complète étape par étape. Pour vraiment comprendre la méthode.</p>
+    <p class="sub">Du mode pédagogique complet à la fiche de révision interactive.</p>
+    <div class="modes-grid">
+      <div class="mode-card">
+        <div class="mode-tag tag-peda">Apprendre</div>
+        <h3>📖 Pédagogique</h3>
+        <p>Règle + explication complète étape par étape. Pour vraiment comprendre la méthode et ne plus faire l'erreur.</p>
       </div>
-      <div class="card">
-        <span class="icon">💡</span>
-        <h3>Indice</h3>
-        <p>Un coup de pouce sans donner la réponse. Pour débloquer par soi-même.</p>
+      <div class="mode-card">
+        <div class="mode-tag tag-troll">Démonstration</div>
+        <h3>😈 Troll</h3>
+        <p>Remplit automatiquement les réponses. Démontre les capacités de l'IA. <strong style="color:#f59e0b">Non conseillé pour apprendre.</strong></p>
       </div>
-      <div class="card">
-        <span class="icon">📝</span>
-        <h3>Révision</h3>
-        <p>Fiche interactive générée sur tout un devoir. Notions clés, erreurs, points à retravailler.</p>
-      </div>
-      <div class="card">
-        <span class="icon">😈</span>
-        <h3>Troll</h3>
-        <p>Démontre les capacités de l'IA. <strong style="color:#f59e0b">Non conseillé pour apprendre.</strong></p>
+      <div class="mode-card">
+        <div class="mode-tag tag-revision">Bilan</div>
+        <h3>📝 Révision</h3>
+        <p>Fiche interactive générée sur tout un devoir. Notions clés, erreurs commises, points à retravailler.</p>
       </div>
     </div>
   </section>
@@ -236,24 +255,33 @@
   <section id="apercu">
     <div class="section-label">Aperçu</div>
     <h2>L'extension en action</h2>
-    <p class="sub"></p>
-    <div class="screenshots">
-      <div class="sc-item">
-        <p class="caption">Réponse directe avec la règle</p>
-        <img src="screenshots/01-reponse-directe.png" alt="Kwyk Tutor réponse directe kwyk.fr">
+    <p class="sub" style="margin-bottom:20px">Utilise les flèches ou glisse pour naviguer.</p>
+    <div class="carousel-wrap" id="carousel">
+      <button class="c-btn c-prev" id="c-prev">&#8249;</button>
+      <button class="c-btn c-next" id="c-next">&#8250;</button>
+      <div class="carousel-inner" id="c-inner">
+        <div class="slide">
+          <p class="caption">Réponse directe avec la règle</p>
+          <img src="screenshots/01-reponse-directe.png" alt="Kwyk Tutor réponse directe kwyk.fr">
+        </div>
+        <div class="slide">
+          <p class="caption">Explication étape par étape</p>
+          <img src="screenshots/02-explication-etape-par-etape.png" alt="Kwyk Tutor explication mathématiques lycée">
+        </div>
+        <div class="slide">
+          <p class="caption">Sélection du mode d'aide</p>
+          <img src="screenshots/03-popup-modes.png" alt="Kwyk Tutor popup sélection mode">
+        </div>
+        <div class="slide">
+          <p class="caption">Mode Troll en action</p>
+          <img src="screenshots/04-mode-troll-correct.png" alt="Kwyk Tutor mode troll">
+        </div>
+        <div class="slide">
+          <p class="caption">Fiche de révision interactive</p>
+          <img src="screenshots/5%20-%20Fiche%20r%C3%A9cap.png" alt="Kwyk Tutor fiche de révision kwyk.fr">
+        </div>
       </div>
-      <div class="sc-item">
-        <p class="caption">Explication étape par étape</p>
-        <img src="screenshots/02-explication-etape-par-etape.png" alt="Kwyk Tutor explication mathématiques lycée">
-      </div>
-      <div class="sc-item">
-        <p class="caption">Sélection du mode d'aide</p>
-        <img src="screenshots/03-popup-modes.png" alt="Kwyk Tutor popup sélection mode">
-      </div>
-      <div class="sc-item">
-        <p class="caption">Fiche de révision interactive</p>
-        <img src="screenshots/5%20-%20Fiche%20r%C3%A9cap.png" alt="Kwyk Tutor fiche de révision kwyk.fr">
-      </div>
+      <div class="c-dots" id="c-dots"></div>
     </div>
   </section>
 
@@ -265,7 +293,7 @@
       <p>Un avis positif aide d'autres élèves à trouver Kwyk Tutor. Cela prend 30 secondes.</p>
       <div class="rate-btns">
         <a class="btn-rate btn-rate-edge" href="https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg" target="_blank">⭐ Noter sur Edge</a>
-        <a class="btn-rate btn-rate-ff" href="LIEN_AMO_REVIEWS" target="_blank">⭐ Noter sur Firefox</a>
+        <a class="btn-rate btn-rate-ff" href="https://addons.mozilla.org/fr/firefox/addon/kwyk-tutor/reviews/" target="_blank">⭐ Noter sur Firefox</a>
       </div>
     </div>
   </section>
@@ -294,16 +322,78 @@
 </footer>
 
 <script>
+  // Nav install button
   (function() {
     const ua = navigator.userAgent;
     const nav = document.getElementById('nav-install');
     if (ua.includes('Firefox/')) {
-      nav.href = 'LIEN_AMO';
+      nav.href = 'https://addons.mozilla.org/fr/firefox/addon/kwyk-tutor/';
       nav.textContent = 'Installer sur Firefox';
     } else {
       nav.href = 'https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg';
-      nav.textContent = ua.includes('Edg/') ? 'Installer sur Edge' : 'Installer (Edge/Chrome)';
+      nav.textContent = navigator.userAgent.includes('Edg/') ? 'Installer sur Edge' : 'Installer (Edge/Chrome)';
     }
+  })();
+
+  // Carrousel
+  (function() {
+    const inner = document.getElementById('c-inner');
+    const dotsEl = document.getElementById('c-dots');
+    const slides = inner.querySelectorAll('.slide');
+    let cur = 0;
+    const total = slides.length;
+
+    function buildDots() {
+      dotsEl.innerHTML = '';
+      for (let i = 0; i < total; i++) {
+        const d = document.createElement('div');
+        d.className = 'dot' + (i === cur ? ' active' : '');
+        d.addEventListener('click', () => goTo(i));
+        dotsEl.appendChild(d);
+      }
+    }
+
+    function goTo(n) {
+      cur = ((n % total) + total) % total;
+      inner.style.transform = 'translateX(-' + (cur * 100) + '%)';
+      dotsEl.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === cur));
+    }
+
+    document.getElementById('c-prev').addEventListener('click', () => goTo(cur - 1));
+    document.getElementById('c-next').addEventListener('click', () => goTo(cur + 1));
+
+    // Touch swipe
+    let sx = 0;
+    inner.addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, {passive: true});
+    inner.addEventListener('touchend', e => {
+      const diff = sx - e.changedTouches[0].clientX;
+      if (Math.abs(diff) > 40) goTo(cur + (diff > 0 ? 1 : -1));
+    }, {passive: true});
+
+    // Keyboard
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') goTo(cur - 1);
+      if (e.key === 'ArrowRight') goTo(cur + 1);
+    });
+
+    buildDots();
+  })();
+
+  // Scroll animations pour les mode-cards
+  (function() {
+    const cards = document.querySelectorAll('.mode-card');
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry, idx) => {
+        if (entry.isIntersecting) {
+          setTimeout(() => {
+            entry.target.style.transition = 'opacity 0.5s ease, transform 0.5s ease, border-color 0.3s, box-shadow 0.3s';
+            entry.target.classList.add('visible');
+          }, idx * 120);
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15 });
+    cards.forEach(c => observer.observe(c));
   })();
 </script>
 
