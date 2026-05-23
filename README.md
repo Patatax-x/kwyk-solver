@@ -1,10 +1,24 @@
-Kwyk Tutor est un assistant pédagogique indépendant conçu pour la plateforme de mathématiques kwyk.fr.
+# Kwyk Tutor 🎓
 
-Fonctionnalités :
-- Mode Pédagogique : analyse l'exercice en cours et fournit une explication détaillée avec la règle, les étapes de résolution et la réponse finale.
-- Mode Troll : remplit automatiquement les réponses générées par l'IA (à titre de démonstration uniquement).
-- Mode Révision : génère une fiche de révision interactive à partir d'un devoir complet.
+> Assistant pédagogique IA pour [kwyk.fr](https://www.kwyk.fr) — comprends tes exercices de maths, pas juste les réponses.
 
-Aucune configuration requise. L'extension fonctionne directement sans clé API ni compte utilisateur. Les appels à l'intelligence artificielle transitent par un serveur intermédiaire sécurisé.
+[![Firefox](https://img.shields.io/badge/Firefox-AMO-orange)](LIEN_AMO)
+[![Edge](https://img.shields.io/badge/Edge-Add--ons-blue)](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg)
 
-Kwyk Tutor est un projet indépendant, non affilié à Kwyk SAS. L'utilisation de ce mode lors d'une évaluation notée ou d'un examen est sous la seule responsabilité de l'utilisateur.
+## ✨ Fonctionnalités
+- 📖 **Mode Pédagogique** — explications étape par étape
+- 💡 **Mode Indice** — coup de pouce sans spoiler
+- 🔁 **Mode Révision** — fiche interactive sur tout le devoir
+- ⌨️ Raccourci Ctrl+Entrée
+
+## 📥 Installation
+| Navigateur | Lien |
+|---|---|
+| Microsoft Edge | [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/kwyk-tutor/cpfjdpkkflmobgfeadjhjlecfehlkblg) |
+| Firefox | [Firefox AMO](LIEN_AMO) |
+
+## 🖥️ Aperçu
+[GIF ou screenshot ici]
+
+## ⚠️ Avertissement
+Kwyk Tutor est un outil pédagogique. L'utilisateur est seul responsable du respect des règles de son établissement.
