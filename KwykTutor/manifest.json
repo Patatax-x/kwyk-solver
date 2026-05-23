@@ -1,9 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "__MSG_extensionName__",
+  "name": "Kwyk Tutor",
   "version": "2.0.1",
-  "description": "__MSG_extensionDescription__",
-  "default_locale": "fr",
+  "description": "Assistant pedagogique pour la plateforme de mathematiques Kwyk.fr",
   "author": "Patatax",
 
   "permissions": [
