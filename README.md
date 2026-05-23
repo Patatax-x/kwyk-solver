@@ -1,4 +1,4 @@
-# 🎓 Kwyk Tutor — Assistant IA pour kwyk.fr
+# 🎓 Kwyk Tutor | Assistant IA pour kwyk.fr
 
 > Extension Chrome et Firefox gratuite pour kwyk.fr. Comprends tes exercices de maths grâce à l'IA — pas juste les réponses.
 
